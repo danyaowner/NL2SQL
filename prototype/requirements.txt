@@ -1,0 +1,10 @@
+# NL2SQL Prototype Dependencies
+# Core
+openai>=1.0.0
+streamlit>=1.28.0
+sqlparse>=0.4.4
+
+# NLP
+langdetect>=1.0.9
+nltk>=3.8.0
+dateparser>=1.1.0
