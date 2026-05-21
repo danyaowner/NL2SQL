@@ -64,8 +64,8 @@ SCHEMA = {
 TABLE_KEYWORDS = {
     "employees": ["сотрудник","работник","персонал","зарплат","salary","отдел","department","должност","position","employee","найм","hire","manager","имя"],
     "projects": ["проект","project","бюджет","budget","status"],
-    "tasks": ["задач","task","приоритет","priority","срок","due","assignee","выполнен","completed"],
-    "comments": ["комментар","comment","автор","author","created_at"],
+    "tasks": ["задач","task","таск","таски","приоритет","priority","срок","due","assignee","выполнен","completed","просроч","overdue"],
+    "comments": ["комментар","comment","комменти","автор","author","created_at"],
 }
 
 TABLE_RELATIONS = {
@@ -87,10 +87,14 @@ def select_tables_keyword(query: str) -> list:
         return ["employees", "projects"]
     scores.sort(key=lambda x: -x[1])
     selected = [s[0] for s in scores]
+    # Only add related tables if there's context suggesting a join is needed
     for t in list(selected):
         for r in TABLE_RELATIONS.get(t, []):
             if r not in selected:
-                selected.append(r)
+                r_keywords = TABLE_KEYWORDS.get(r, [])
+                r_score = sum(1 for kw in r_keywords if kw in tl)
+                if r_score > 0:
+                    selected.append(r)
     return selected
 
 def select_columns_keyword(query: str, tables: list) -> dict:

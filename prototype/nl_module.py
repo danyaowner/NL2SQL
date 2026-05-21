@@ -20,8 +20,8 @@ except ImportError:
 TABLE_ALIASES = {
     "employees": ["сотрудник","сотрудники","работник","работники","employee","employees"],
     "projects": ["проект","проекты","project","projects"],
-    "tasks": ["задача","задачи","задание","задания","task","tasks"],
-    "comments": ["комментари","комментар","comment","comments"],
+    "tasks": ["задача","задачи","задание","задания","task","tasks","таск","таски"],
+    "comments": ["комментари","комментар","comment","comments","комменти"],
 }
 
 QUERY_TYPES = {
@@ -34,7 +34,7 @@ QUERY_TYPES = {
 def clean_query(text: str) -> str:
     """Очистка запроса."""
     text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"[^\w\s.,!?;:\'\"()а-яА-Яa-zA-Z0-9-]", " ", text)
+    text = re.sub(r"[^\w\s.,!?;:\'\"()а-яА-Яa-zA-Z0-9<>=-]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -69,10 +69,16 @@ def extract_entities(text: str) -> list:
         "it": "Разработка", "айти": "Разработка",
         "аналит": "Аналитика",
     }
+    # Для ключей it/айти проверяем контекст — не путать с англ. словом "it"
+    dept_context_words = ["из", "в", "отдел", "department", "dep"]
     for word in text_lower.split():
         for key, dep in dep_map.items():
             if key in word and f"department:{dep}" not in entities:
-                entities.append(f"department:{dep}")
+                if key in ("it", "айти"):
+                    if any(ctx in text_lower for ctx in dept_context_words):
+                        entities.append(f"department:{dep}")
+                else:
+                    entities.append(f"department:{dep}")
     return entities
 
 def classify_query(text: str, lang: str = "ru") -> str:
@@ -87,8 +93,16 @@ def classify_query(text: str, lang: str = "ru") -> str:
 def extract_numbers(text: str) -> list:
     """Извлечение чисел из текста."""
     numbers = []
+    # Обычные числа
     for m in re.finditer(r"\b\d+\b", text):
         numbers.append(int(m.group()))
+    # Числа с суффиксом к/кк (100к = 100000, 5кк = 5000000)
+    for m in re.finditer(r"\b(\d+)\s*к(к)?\b", text.lower()):
+        val = int(m.group(1))
+        if m.group(2):  # кк = миллионы
+            numbers.append(val * 1000000)
+        else:  # к = тысячи
+            numbers.append(val * 1000)
     word_nums = {"один":1,"два":2,"три":3,"четыре":4,"пять":5,"сто":100,"тысяч":1000,"миллион":1000000}
     text_lower = text.lower()
     for word, val in word_nums.items():
@@ -115,6 +129,31 @@ def extract_conditions(text: str) -> dict:
         if m:
             conds[field] = {"value": int(m.group(1)), "op": op}
             break
+    # Generic number comparison (> N, < N) - as fallback when no field prefix
+    has_field_prefix = False
+    for pat, _, _ in pats:
+        if re.search(pat, tl):
+            has_field_prefix = True
+            break
+    
+    if not has_field_prefix:
+        for m in re.finditer(r">\s*(\d+)\s*к?\b", tl):
+            val = int(m.group(1))
+            # Check if there's a "к" suffix (100к = 100000)
+            after_digit = tl[m.end(1):m.end()]
+            if "к" in after_digit:
+                val *= 1000
+            conds["salary"] = {"value": val, "op": ">"}
+            break
+        for m in re.finditer(r"<\s*(\d+)\s*к?\b", tl):
+            if "salary" not in conds:
+                val = int(m.group(1))
+                after_digit = tl[m.end(1):m.end()]
+                if "к" in after_digit:
+                    val *= 1000
+                conds["salary"] = {"value": val, "op": "<"}
+            break
+    
     if "оплач" in tl:
         conds["salary"] = {"value": 0, "op": ">"}
     elif "высок" in tl or "high" in tl or "critical" in tl or "критич" in tl:
@@ -134,6 +173,20 @@ def extract_conditions(text: str) -> dict:
         conds["status"] = {"value": "active", "op": "="}
     elif "заверш" in tl or "completed" in tl or "выполнен" in tl or "готов" in tl:
         conds["status"] = {"value": "completed", "op": "="}
+    # Задачи без исполнителя
+    if "без" in tl and ("исполнител" in tl or "assignee" in tl or "назначен" in tl):
+        conds["assignee_id"] = {"value": None, "op": "is_null"}
+    # Просрочка
+    if "просроч" in tl or "overdue" in tl or "просрочен" in tl:
+        conds["due_date"] = {"value": "now", "op": "overdue"}
+    # "задача N" или "task N" → task_id = N
+    task_num = re.search(r"(?:задач[а-я]*|task)\s+(\d+)", tl)
+    if task_num:
+        conds["task_id"] = {"value": int(task_num.group(1)), "op": "="}
+    # "проект N" или "project N" → project_id = N
+    proj_num = re.search(r"(?:проект[а-я]*|project)\s+(\d+)", tl)
+    if proj_num:
+        conds["project_id"] = {"value": int(proj_num.group(1)), "op": "="}
     return conds
 
 def process_query(text: str) -> dict:

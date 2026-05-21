@@ -49,6 +49,9 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
 
     # Определяем основную таблицу
     main_table = tables[0] if tables else "employees"
+    
+    # Извлекаем числа для LIMIT (топ N)
+    numbers = query_info.get("numbers", [])
 
     # Определяем SELECT часть
     has_project = "project" in text or "проект" in text
@@ -163,7 +166,11 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
     where_parts = []
     for field, info in conds.items():
         if field == "salary":
-            where_parts.append(f"salary {info['op']} {info['value']}")
+            if main_table == "projects":
+                # Generic > N on projects means budget, not salary
+                where_parts.append(f"budget {info['op']} {info['value']}")
+            else:
+                where_parts.append(f"salary {info['op']} {info['value']}")
         elif field == "budget":
             where_parts.append(f"budget {info['op']} {info['value']}")
         elif field == "department":
@@ -194,6 +201,18 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
                     where_parts.append(f"status = '{info['value']}'")
             else:
                 where_parts.append(f"status = '{info['value']}'")
+        elif field == "assignee_id":
+            if info['op'] == 'is_null':
+                where_parts.append("assignee_id IS NULL")
+        elif field == "due_date":
+            if info['op'] == 'overdue':
+                where_parts.append("due_date < date('now')")
+        elif field == "task_id":
+            if info['op'] == '=':
+                where_parts.append(f"t.task_id = {info['value']}")
+        elif field == "project_id":
+            if info['op'] == '=':
+                where_parts.append(f"p.project_id = {info['value']}")
 
     # Также проверяем упоминания отдела в entities
     # Если нужен department, но его нет в основной таблице - добавляем JOIN к employees
@@ -209,17 +228,28 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
             if has_employees_in_from:
                 where_parts.append(f"department = '{dep_filter_value}'")
             else:
-                needs_department_join = True
+                # Only add department join if the query has explicit department context
+                has_dept_context = any(ctx in text for ctx in ["из", "в", "отдел", "department", "dep"])
+                if has_dept_context:
+                    needs_department_join = True
     
     if needs_department_join and dep_filter_value:
         # Add employee join for department filter
+        # Determine the correct alias for the join condition
         if "comments" in tables:
             if "tasks" in tables and ("JOIN tasks" in from_clause or "JOIN tasks" in from_clause.upper()):
+                # comments + tasks - tasks is aliased as t
                 from_clause += " JOIN employees e ON t.assignee_id = e.employee_id"
             else:
-                from_clause += " JOIN employees e ON c.author_id = e.employee_id"
+                # comments only - join via author_id
+                from_clause += " JOIN employees e ON comments.author_id = e.employee_id"
         elif "tasks" in tables:
-            from_clause += " JOIN employees e ON t.assignee_id = e.employee_id"
+            if "JOIN" in from_clause.upper():
+                # tasks is aliased as t in JOINs
+                from_clause += " JOIN employees e ON t.assignee_id = e.employee_id"
+            else:
+                # tasks is the main table without alias
+                from_clause += " JOIN employees e ON tasks.assignee_id = e.employee_id"
         else:
             from_clause += " JOIN employees e ON e.employee_id = e.employee_id"
         where_parts.append(f"e.department = '{dep_filter_value}'")
@@ -296,15 +326,18 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
     if not order_limit:
         if "топ" in text or "top" in text or "best" in text:
             if select == "*":
-                # For SELECT * with "top", skip ORDER BY (no aggregation to sort by)
-                pass
+                # For SELECT * with "top", try to order by a sensible column
+                if "зарплат" in text or "salary" in text:
+                    limit_val = numbers[0] if numbers else 5
+                    order_limit = f"ORDER BY salary DESC LIMIT {limit_val}"
+                elif "бюджет" in text or "budget" in text:
+                    limit_val = numbers[0] if numbers else 5
+                    order_limit = f"ORDER BY budget DESC LIMIT {limit_val}"
             else:
                 # Use the actual alias from SELECT for ordering
                 order_col = order_alias if order_alias else "count"
-                if order_col == "count":
-                    order_limit = "ORDER BY count DESC LIMIT 3"
-                else:
-                    order_limit = f"ORDER BY {order_col} DESC LIMIT 3"
+                limit_val = numbers[0] if numbers else 3
+                order_limit = f"ORDER BY {order_col} DESC LIMIT {limit_val}"
         elif "больше всего" in text or "highest" in text:
             # Determine proper ORDER BY based on context
             if order_alias:
