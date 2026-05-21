@@ -27,7 +27,7 @@ TABLE_ALIASES = {
 QUERY_TYPES = {
     "count": ["сколько","количество","сколько всего","число","посчитай","how many","count","total"],
     "find": ["найди","покажи","выведи","найти","отобрази","find","show","display","get","list"],
-    "aggregate": ["сумма","среднее","максимум","минимум","avg","sum","average","maximum","minimum","итог"],
+    "aggregate": ["сумма","среднее","максимум","минимум","avg","sum","average","maximum","minimum","итог","общий","общая","всего","итого"],
     "compare": ["сравни","кто больше","выше чем","топ","compare","top","highest","lowest"],
 }
 
@@ -66,6 +66,8 @@ def extract_entities(text: str) -> list:
         "маркетинг": "Маркетинг", "бухгалтер": "Бухгалтерия",
         "hr": "HR", "кадры": "HR", "sales": "Продажи",
         "developer": "Разработка", "dev": "Разработка",
+        "it": "Разработка", "айти": "Разработка",
+        "аналит": "Аналитика",
     }
     for word in text_lower.split():
         for key, dep in dep_map.items():
@@ -116,9 +118,18 @@ def extract_conditions(text: str) -> dict:
     if "оплач" in tl:
         conds["salary"] = {"value": 0, "op": ">"}
     elif "высок" in tl or "high" in tl or "critical" in tl or "критич" in tl:
-        conds["priority"] = {"value": "high", "op": "in"}
+        if "зарплат" in tl or "salary" in tl:
+            conds["salary"] = {"value": 0, "op": ">"}
+        else:
+            conds["priority"] = {"value": "high", "op": "in"}
     elif "средн" in tl or "medium" in tl:
-        conds["priority"] = {"value": "medium", "op": "="}
+        # Avoid confusing "средняя зарплата" (average salary) with priority=medium
+        if "приоритет" in tl or "priority" in tl:
+            conds["priority"] = {"value": "medium", "op": "="}
+        elif "зарплат" in tl or "salary" in tl or "бюджет" in tl or "budget" in tl:
+            pass  # This is "average salary/budget", not priority
+        else:
+            conds["priority"] = {"value": "medium", "op": "="}
     if "активн" in tl or "active" in tl:
         conds["status"] = {"value": "active", "op": "="}
     elif "заверш" in tl or "completed" in tl or "выполнен" in tl or "готов" in tl:
