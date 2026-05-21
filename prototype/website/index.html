@@ -10,72 +10,59 @@
 <body>
 <div class="bg-pattern"></div>
 
-<header class="header">
-  <div class="header-content">
-    <div class="logo">
-      <span class="logo-icon">&#x1F5C4;</span>
-      <div>
-        <h1>NL2SQL Prototype</h1>
-        <span class="logo-sub">Natural Language &rarr; SQL</span>
+<!-- Upload Landing Screen (shown on load) -->
+<div class="upload-screen" id="uploadScreen">
+  <div class="upload-container">
+    <div class="upload-logo">
+      <span class="upload-logo-icon">&#x1F5C4;</span>
+    </div>
+    <h1 class="upload-title">NL2SQL Prototype</h1>
+    <p class="upload-subtitle">Natural Language &rarr; SQL</p>
+    <p class="upload-desc">Загрузите <strong>.db</strong> файл с вашей базой данных,<br>чтобы начать задавать вопросы на естественном языке</p>
+    
+    <div class="db-drop-zone" id="dbDropZone">
+      <div class="db-drop-icon">&#x1F4C1;</div>
+      <div class="db-drop-text">
+        <strong>Перетащите .db файл сюда</strong>
+        <span>или нажмите для выбора файла</span>
       </div>
+      <input type="file" id="dbFileInput" accept=".db" style="display:none">
     </div>
-    <div class="header-status">
-      <span class="status-dot" id="statusDot"></span>
-      <span id="statusText">Проверка подключения...</span>
-      <button class="btn-db-switch" id="dbSwitchBtn" onclick="switchDatabase()" title="Сменить базу данных" style="display:none">
-        <span>&#x1F5C2;&#xFE0F;</span>
-        <span id="dbSelectedName" class="db-header-name">test_company.db</span>
-        <span class="db-switch-icon">&#x21C5;</span>
-      </button>
-    </div>
-  </div>
-</header>
 
-<!-- Database Selector Overlay -->
-<div class="db-overlay" id="dbSelector">
-  <div class="db-overlay-bg" onclick="event.target===this&&switchDatabase()"></div>
-  <div class="db-modal">
-    <div class="db-modal-header">
-      <div class="db-modal-title">
-        <span class="db-modal-icon">&#x1F5C4;&#xFE0F;</span>
-        <h2>Выберите базу данных</h2>
+    <div class="db-upload-status" id="dbUploadStatus" style="display:none">
+      <div class="db-upload-progress-bar">
+        <div class="db-upload-progress-fill" id="dbUploadProgress"></div>
       </div>
-      <p class="db-modal-desc">Выберите .db файл для работы. Все запросы будут выполняться к этой базе данных.</p>
+      <div class="db-upload-text" id="dbUploadText">Загрузка...</div>
     </div>
-    <div class="db-modal-body">
-      <div class="db-loading" id="dbLoading">
-        <div class="spinner"></div>
-        <p>Поиск баз данных...</p>
-      </div>
-      <div class="db-error" id="dbError" style="display:none"></div>
-      <div class="db-list" id="dbList"></div>
 
-      <!-- Drag & Drop Upload -->
-      <div class="db-upload-section">
-        <div class="db-divider">
-          <span class="db-divider-line"></span>
-          <span class="db-divider-text">или загрузите новую</span>
-          <span class="db-divider-line"></span>
-        </div>
-        <div class="db-drop-zone" id="dbDropZone">
-          <div class="db-drop-icon">&#x1F4C1;</div>
-          <div class="db-drop-text">
-            <strong>Перетащите .db файл сюда</strong>
-            <span>или нажмите для выбора файла</span>
-          </div>
-          <input type="file" id="dbFileInput" accept=".db" style="display:none">
-        </div>
-        <div class="db-upload-status" id="dbUploadStatus" style="display:none">
-          <div class="db-upload-progress-bar">
-            <div class="db-upload-progress-fill" id="dbUploadProgress"></div>
-          </div>
-          <div class="db-upload-text" id="dbUploadText">Загрузка...</div>
-        </div>
-      </div>
+    <div class="db-error" id="dbError" style="display:none"></div>
+
+    <div class="upload-footer">
+      <span>&#x26A1; Поддержка русского и английского языка</span>
+      <span>&#x1F5C4; Работает с любыми SQLite базами</span>
+    </div>
   </div>
 </div>
 
-<main class="main" id="mainContent">
+<!-- Main Content (hidden until upload) -->
+<main class="main" id="mainContent" style="display:none">
+  <header class="header">
+    <div class="header-content">
+      <div class="logo">
+        <span class="logo-icon">&#x1F5C4;</span>
+        <div>
+          <h1>NL2SQL Prototype</h1>
+          <span class="logo-sub">Natural Language &rarr; SQL</span>
+        </div>
+      </div>
+      <div class="header-status">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Проверка подключения...</span>
+      </div>
+    </div>
+  </header>
+
   <div class="container">
     <section class="card input-card">
       <div class="card-header">
@@ -115,6 +102,8 @@
           </table>
         </div>
       </div>
+    </section>
+
     <section class="card error-card" id="errorCard" style="display:none">
       <div class="error-content">
         <span class="error-icon">&#x274C;</span>
@@ -125,26 +114,23 @@
       </div>
     </section>
 
-    </section> <!-- /resultsSection -->
-
     <section class="card schema-card">
       <div class="card-header">
         <h2>&#x1F5C2;&#xFE0F; Схема базы данных</h2>
-        <p class="card-desc" id="schemaDesc">Выберите базу данных для работы</p>
+        <p class="card-desc" id="schemaDesc">Загрузите базу данных для работы</p>
       </div>
       <div class="schema-grid" id="schemaGrid">
         <div class="schema-loading" id="schemaLoading">Загрузка схемы...</div>
       </div>
     </section>
   </div>
-</main>
 
-<footer class="footer">
-  <div class="footer-content">
-    <span>NL2SQL Prototype &middot; Режим: <strong>Demo</strong></span>
-    <span>База данных: <strong id="footerDbName">—</strong></span>
-  </div>
-</footer>
+  <footer class="footer">
+    <div class="footer-content">
+      <span>NL2SQL Prototype &middot; Режим: <strong>Demo</strong></span>
+    </div>
+  </footer>
+</main>
 
 <script src="/website/script.js"></script>
 </body>

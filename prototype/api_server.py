@@ -7,7 +7,9 @@ import http.server
 import json
 import os
 import sys
+import threading
 import urllib.parse
+import webbrowser
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,55 +20,9 @@ from sql_generator import generate as gen_sql
 import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DB = os.path.join(BASE_DIR, "test_company.db")
 
-# Current selected database (per-session via API)
-current_db = DEFAULT_DB
-
-# Init default DB if not exists
-if not os.path.exists(DEFAULT_DB):
-    try:
-        from init_db import main as init_db
-        init_db()
-    except Exception:
-        pass
-
-
-def get_available_databases():
-    """Сканирование директории на .db файлы."""
-    dbs = []
-    for f in os.listdir(BASE_DIR):
-        if f.endswith(".db"):
-            path = os.path.join(BASE_DIR, f)
-            size = os.path.getsize(path)
-            dbs.append({
-                "name": f,
-                "path": path,
-                "size": size,
-                "size_hr": f"{size/1024:.1f} KB" if size < 1024*1024 else f"{size/(1024*1024):.1f} MB"
-            })
-    return dbs
-
-
-def get_database_info(db_path):
-    """Получение информации о таблицах в БД."""
-    if not os.path.exists(db_path):
-        return None
-    try:
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        tables = []
-        for row in cur.fetchall():
-            tname = row[0]
-            cnt = cur.execute(f"SELECT COUNT(*) FROM \"{tname}\"").fetchone()[0]
-            cur.execute(f"PRAGMA table_info(\"{tname}\")")
-            cols = [{"name": r[1], "type": r[2]} for r in cur.fetchall()]
-            tables.append({"name": tname, "row_count": cnt, "columns": cols})
-        conn.close()
-        return {"tables": tables, "total_tables": len(tables)}
-    except Exception as e:
-        return {"error": str(e)}
+# Current selected database (None until user uploads one)
+current_db = None
 
 
 def get_schema_info():
@@ -82,7 +38,7 @@ def get_schema_info():
 def run_sql(sql, db_path=None):
     if db_path is None:
         db_path = current_db
-    if not os.path.exists(db_path):
+    if db_path is None or not os.path.exists(db_path):
         return None, "База данных не найдена"
     try:
         conn = sqlite3.connect(db_path)
@@ -230,39 +186,8 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
         elif path == "/api/health":
             self._send_json({
                 "status": "ok",
-                "db_exists": os.path.exists(current_db),
-                "current_db": os.path.basename(current_db) if current_db else None
-            })
-        elif path == "/api/databases":
-            """Список доступных .db файлов."""
-            dbs = get_available_databases()
-            # Add info for each db
-            for db in dbs:
-                info = get_database_info(db["path"])
-                if info:
-                    db["tables"] = info["tables"]
-                    db["total_tables"] = info["total_tables"]
-                db["is_current"] = (db["path"] == current_db)
-            self._send_json({"databases": dbs, "current": os.path.basename(current_db) if current_db else None})
-        elif path == "/api/database-info":
-            """Информация о выбранной БД."""
-            db_name = qs.get("name", [None])[0]
-            if db_name:
-                db_path = os.path.join(BASE_DIR, db_name)
-            else:
-                db_path = current_db
-            info = get_database_info(db_path)
-            if info:
-                info["name"] = os.path.basename(db_path)
-                self._send_json(info)
-            else:
-                self._send_json({"error": "Database not found"})
-        elif path == "/api/current-db":
-            """Текущая БД."""
-            self._send_json({
-                "name": os.path.basename(current_db) if current_db else None,
-                "path": current_db,
-                "exists": os.path.exists(current_db) if current_db else False
+                "db_loaded": current_db is not None and os.path.exists(current_db),
+                "current_db": os.path.basename(current_db) if current_db and os.path.exists(current_db) else None
             })
         elif path == "/" or path == "" or path == "/index.html":
             self.path = "/website/index.html"
@@ -341,28 +266,11 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
             if not query.strip():
                 self._send_json({"error": "Запрос не может быть пустым"})
                 return
+            if current_db is None or not os.path.exists(current_db):
+                self._send_json({"error": "База данных не загружена. Загрузите .db файл через /api/upload-database"})
+                return
             results = process_query_full(query)
             self._send_json(results)
-        elif path == "/api/select-database":
-            """Выбор активной БД."""
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length)
-            data = json.loads(body)
-            db_name = data.get("name", "")
-            if not db_name:
-                self._send_json({"success": False, "error": "No database name provided"})
-                return
-            db_path = os.path.join(BASE_DIR, db_name)
-            if not os.path.exists(db_path):
-                self._send_json({"success": False, "error": f"Database '{db_name}' not found"})
-                return
-            current_db = db_path
-            info = get_database_info(db_path)
-            self._send_json({
-                "success": True,
-                "name": db_name,
-                "info": info
-            })
         elif path == "/api/upload-database":
             """Загрузка .db файла через multipart/form-data."""
             form = self._parse_multipart_body()
@@ -403,16 +311,14 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({"success": False, "error": "File is not a valid SQLite database"})
                 return
 
-            # Auto-select the uploaded database
+            # Set as active database
             current_db = save_path
             saved_name = os.path.basename(save_path)
-            info = get_database_info(save_path)
 
             self._send_json({
                 "success": True,
                 "name": saved_name,
-                "original_name": original_filename,
-                "info": info
+                "original_name": original_filename
             })
         else:
             self.send_error(404, "Not found")
@@ -423,6 +329,27 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8"))
+
+
+def open_browser():
+    """Открыть браузер с небольшой задержкой после старта сервера.
+    В WSL использует explorer.exe, на Linux/Mac — xdg-open / open.
+    """
+    url = "http://localhost:8000"
+    try:
+        # WSL: открываем через Windows explorer.exe
+        if os.name == "nt" or (hasattr(os, "uname") and "microsoft" in os.uname().release.lower()):
+            import subprocess
+            explorer = "/mnt/c/Windows/explorer.exe"
+            if os.path.exists(explorer):
+                subprocess.Popen([explorer, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                print(f"🌍 Браузер открыт: {url}")
+                return
+        # Обычный способ
+        webbrowser.open(url)
+        print(f"🌍 Браузер открыт: {url}")
+    except Exception:
+        pass
 
 
 def main():
@@ -436,6 +363,8 @@ def main():
     print(f"📖 Откройте в браузере: http://localhost:{port}")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print("💡 Нажмите Ctrl+C для остановки")
+    # Авто-открытие браузера через 1.5 секунды
+    threading.Timer(1.5, open_browser).start()
     httpd.serve_forever()
 
 

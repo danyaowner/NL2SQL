@@ -15,27 +15,6 @@ const API = {
     });
     return res.json();
   },
-  async getDatabases() {
-    const res = await fetch("/api/databases");
-    return res.json();
-  },
-  async selectDatabase(name) {
-    const res = await fetch("/api/select-database", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    return res.json();
-  },
-  async getCurrentDb() {
-    const res = await fetch("/api/current-db");
-    return res.json();
-  },
-  async getDatabaseInfo(name) {
-    const url = name ? "/api/database-info?name=" + encodeURIComponent(name) : "/api/database-info";
-    const res = await fetch(url);
-    return res.json();
-  },
   async uploadDatabase(file, onProgress) {
     return new Promise(function(resolve, reject) {
       var formData = new FormData();
@@ -76,210 +55,25 @@ const QUICK_QUERIES = [
   "Find all employees in sales department",
 ];
 
+// ─── Init ────────────────────────────────────────────────────────────
+
 window.addEventListener("DOMContentLoaded", async () => {
   await checkHealth();
   renderQuickTags();
-  // Show database selector first
-  await showDatabaseSelector();
+  initUpload();
   const input = document.getElementById("queryInput");
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") submitQuery();
-  });
+  if (input) {
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitQuery();
+    });
+  }
 });
 
-function renderQuickTags() {
-  const container = document.getElementById("quickTags");
-  container.innerHTML = QUICK_QUERIES.map(function(q) {
-    return '<span class="tag" onclick="setQuery(this)">' + q + "</span>";
-  }).join("");
-}
+// ─── Upload Screen ───────────────────────────────────────────────────
 
-function setQuery(el) {
-  document.getElementById("queryInput").value = el.textContent;
-  submitQuery();
-}
-
-async function checkHealth() {
-  try {
-    const status = await API.health();
-    const dot = document.getElementById("statusDot");
-    const text = document.getElementById("statusText");
-    if (status.status === "ok") {
-      dot.className = "status-dot online";
-      text.textContent = status.current_db
-        ? "БД: " + status.current_db
-        : "Сервер подключен";
-    }
-  } catch (e) {
-    document.getElementById("statusDot").className = "status-dot offline";
-    document.getElementById("statusText").textContent = "Сервер не доступен";
-  }
-}
-
-async function loadSchema() {
-  try {
-    const schema = await API.getSchema();
-    const grid = document.getElementById("schemaGrid");
-    grid.innerHTML = "";
-    Object.entries(schema).forEach(function(entry) {
-      var name = entry[0];
-      var info = entry[1];
-      var card = document.createElement("div");
-      card.className = "schema-table";
-      var colEntries = Object.entries(info.columns).slice(0, 8);
-      var lis = "";
-      for (var i = 0; i < colEntries.length; i++) {
-        lis += "<li>" + colEntries[i][0] + ": " + colEntries[i][1] + "</li>";
-      }
-      card.innerHTML = "<h3>" + name + '</h3><div class="table-desc">' + info.description + "</div><ul>" + lis + "</ul>";
-      grid.appendChild(card);
-    });
-  } catch (e) {
-    document.getElementById("schemaGrid").innerHTML =
-      '<div class="schema-loading" style="color:var(--red)">Error loading schema</div>';
-  }
-}
-
-// ─── Database Selector ───────────────────────────────────────────────
-
-async function showDatabaseSelector() {
-  var overlay = document.getElementById("dbSelector");
-  var list = document.getElementById("dbList");
-  var loading = document.getElementById("dbLoading");
-  var errorEl = document.getElementById("dbError");
-
-  overlay.style.display = "flex";
-  list.innerHTML = "";
-  loading.style.display = "block";
-  errorEl.style.display = "none";
-  resetUploadUI();
-  initDragDrop();
-
-  try {
-    var data = await API.getDatabases();
-    loading.style.display = "none";
-
-    if (!data.databases || data.databases.length === 0) {
-      list.innerHTML = '<div class="db-empty">\n' +
-        '  <div class="db-empty-icon">📭</div>\n' +
-        '  <h3>Нет баз данных</h3>\n' +
-        '  <p>В папке prototype/ не найдено .db файлов</p>\n' +
-        '</div>';
-      return;
-    }
-
-    data.databases.forEach(function(db) {
-      var card = document.createElement("div");
-      card.className = "db-card" + (db.is_current ? " db-card-current" : "");
-
-      var tablesHtml = "";
-      if (db.tables && db.tables.length > 0) {
-        tablesHtml = '<div class="db-tables">';
-        db.tables.forEach(function(t) {
-          tablesHtml += '<span class="db-table-badge">' + t.name + ' (' + t.row_count + ')</span>';
-        });
-        tablesHtml += "</div>";
-      }
-
-      card.innerHTML =
-        '<div class="db-card-left">' +
-          '<div class="db-icon">🗄️</div>' +
-        '</div>' +
-        '<div class="db-card-body">' +
-          '<h3 class="db-name">' + db.name + '</h3>' +
-          '<div class="db-meta">' +
-            '<span>' + db.size_hr + '</span>' +
-            (db.total_tables !== undefined ? '<span>' + db.total_tables + ' таблиц</span>' : '') +
-          '</div>' +
-          tablesHtml +
-        '</div>' +
-        '<div class="db-card-right">' +
-          (db.is_current
-            ? '<span class="db-active-badge">Активна</span>'
-            : '<button class="db-select-btn" onclick="selectDatabase(this, \'' + db.name + '\')">Выбрать</button>') +
-        '</div>';
-
-      list.appendChild(card);
-    });
-
-    // If current DB is set and exists, auto-select it after showing
-    if (data.current) {
-      var dbNameEl = document.getElementById("dbSelectedName");
-      if (dbNameEl) dbNameEl.textContent = data.current;
-      var statusText = document.getElementById("statusText");
-      if (statusText) statusText.textContent = "БД: " + data.current;
-    }
-
-  } catch (e) {
-    loading.style.display = "none";
-    errorEl.style.display = "block";
-    errorEl.textContent = "Ошибка загрузки: " + e.message;
-  }
-}
-
-async function selectDatabase(btn, name) {
-  // Allow calling as onclick handler or programmatically
-  if (typeof name === "undefined") {
-    name = btn;
-    btn = null;
-  }
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "⏳";
-  }
-
-  try {
-    var result = await API.selectDatabase(name);
-    if (result.success) {
-      // Update UI
-      var nameEl = document.getElementById("dbSelectedName");
-      if (nameEl) nameEl.textContent = name;
-      var statusText = document.getElementById("statusText");
-      if (statusText) statusText.textContent = "БД: " + name;
-
-      // Show DB switch button
-      var switchBtn = document.getElementById("dbSwitchBtn");
-      if (switchBtn) switchBtn.style.display = "";
-
-      // Update footer
-      var footerDb = document.getElementById("footerDbName");
-      if (footerDb) footerDb.textContent = name;
-
-      // Update schema description
-      var schemaDesc = document.getElementById("schemaDesc");
-      if (schemaDesc) schemaDesc.textContent = "Таблицы базы: " + name;
-
-      // Hide overlay
-      document.getElementById("dbSelector").style.display = "none";
-
-      // Load schema
-      await loadSchema();
-    } else {
-      alert("Ошибка: " + (result.error || "Неизвестная ошибка"));
-    }
-  } catch (e) {
-    alert("Ошибка подключения: " + e.message);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Выбрать";
-    }
-  }
-}
-
-function switchDatabase() {
-  showDatabaseSelector();
-}
-
-// ─── Drag & Drop Upload ─────────────────────────────────────────────
-
-function initDragDrop() {
-  if (window._dragDropInit) return;
-  window._dragDropInit = true;
-
+function initUpload() {
   var dropZone = document.getElementById("dbDropZone");
   var fileInput = document.getElementById("dbFileInput");
-
   if (!dropZone) return;
 
   // Click to browse
@@ -289,7 +83,7 @@ function initDragDrop() {
 
   fileInput.addEventListener("change", function() {
     if (fileInput.files.length > 0) {
-      uploadFile(fileInput.files[0]);
+      startUpload(fileInput.files[0]);
       fileInput.value = "";
     }
   });
@@ -325,18 +119,19 @@ function initDragDrop() {
         showUploadError("Только .db файлы принимаются");
         return;
       }
-      uploadFile(file);
+      startUpload(file);
     }
   });
 }
 
-async function uploadFile(file) {
+async function startUpload(file) {
   var dropZone = document.getElementById("dbDropZone");
   var uploadStatus = document.getElementById("dbUploadStatus");
   var progressFill = document.getElementById("dbUploadProgress");
   var progressText = document.getElementById("dbUploadText");
+  var errorEl = document.getElementById("dbError");
 
-  // Show upload status
+  errorEl.style.display = "none";
   dropZone.style.display = "none";
   uploadStatus.style.display = "block";
   progressFill.style.width = "0%";
@@ -352,10 +147,10 @@ async function uploadFile(file) {
       progressFill.style.width = "100%";
       progressText.textContent = "✅ " + result.name + " загружена!";
 
-      // Auto-select after short delay
+      // Switch to main interface
       setTimeout(function() {
-        selectDatabase(result.name);
-      }, 800);
+        onDatabaseLoaded(result.name);
+      }, 600);
     } else {
       showUploadError(result.error || "Ошибка загрузки");
     }
@@ -375,14 +170,76 @@ function showUploadError(msg) {
   errorEl.textContent = "❌ " + msg;
 }
 
-function resetUploadUI() {
-  var dropZone = document.getElementById("dbDropZone");
-  var uploadStatus = document.getElementById("dbUploadStatus");
-  var errorEl = document.getElementById("dbError");
+function onDatabaseLoaded(name) {
+  // Hide upload screen, show main interface
+  document.getElementById("uploadScreen").style.display = "none";
+  document.getElementById("mainContent").style.display = "";
 
-  dropZone.style.display = "";
-  uploadStatus.style.display = "none";
-  errorEl.style.display = "none";
+  // Update status
+  var statusText = document.getElementById("statusText");
+  if (statusText) statusText.textContent = "БД: " + name;
+
+  var schemaDesc = document.getElementById("schemaDesc");
+  if (schemaDesc) schemaDesc.textContent = "Таблицы базы: " + name;
+
+  // Load schema
+  loadSchema();
+}
+
+// ─── Query Interface ─────────────────────────────────────────────────
+
+function renderQuickTags() {
+  var container = document.getElementById("quickTags");
+  if (!container) return;
+  container.innerHTML = QUICK_QUERIES.map(function(q) {
+    return '<span class="tag" onclick="setQuery(this)">' + q + "</span>";
+  }).join("");
+}
+
+function setQuery(el) {
+  document.getElementById("queryInput").value = el.textContent;
+  submitQuery();
+}
+
+async function checkHealth() {
+  try {
+    var status = await API.health();
+    var dot = document.getElementById("statusDot");
+    var text = document.getElementById("statusText");
+    if (status.status === "ok") {
+      dot.className = "status-dot online";
+      text.textContent = "Сервер подключен";
+    }
+  } catch (e) {
+    var dot = document.getElementById("statusDot");
+    var text = document.getElementById("statusText");
+    if (dot) dot.className = "status-dot offline";
+    if (text) text.textContent = "Сервер не доступен";
+  }
+}
+
+async function loadSchema() {
+  try {
+    var schema = await API.getSchema();
+    var grid = document.getElementById("schemaGrid");
+    grid.innerHTML = "";
+    Object.entries(schema).forEach(function(entry) {
+      var name = entry[0];
+      var info = entry[1];
+      var card = document.createElement("div");
+      card.className = "schema-table";
+      var colEntries = Object.entries(info.columns).slice(0, 8);
+      var lis = "";
+      for (var i = 0; i < colEntries.length; i++) {
+        lis += "<li>" + colEntries[i][0] + ": " + colEntries[i][1] + "</li>";
+      }
+      card.innerHTML = "<h3>" + name + '</h3><div class="table-desc">' + info.description + "</div><ul>" + lis + "</ul>";
+      grid.appendChild(card);
+    });
+  } catch (e) {
+    var grid = document.getElementById("schemaGrid");
+    if (grid) grid.innerHTML = '<div class="schema-loading" style="color:var(--red)">Error loading schema</div>';
+  }
 }
 
 // ─── Query Submission ────────────────────────────────────────────────
@@ -403,7 +260,7 @@ async function submitQuery() {
     showError("Connection error");
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<span class="btn-icon">⚡</span> Выполнить';
+    btn.innerHTML = '<span class="btn-icon">&#x26A1;</span> Выполнить';
   }
 }
 
