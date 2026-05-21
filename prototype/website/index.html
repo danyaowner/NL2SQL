@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NL2SQL Prototype</title>
+<link rel="stylesheet" href="/website/styles.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="bg-pattern"></div>
+
+<header class="header">
+  <div class="header-content">
+    <div class="logo">
+      <span class="logo-icon">&#x1F5C4;</span>
+      <div>
+        <h1>NL2SQL Prototype</h1>
+        <span class="logo-sub">Natural Language &rarr; SQL</span>
+      </div>
+    </div>
+    <div class="header-status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Проверка подключения...</span>
+    </div>
+  </div>
+</header>
+
+<main class="main">
+  <div class="container">
+    <section class="card input-card">
+      <div class="card-header">
+        <h2>&#x1F4AC; Введите запрос</h2>
+        <p class="card-desc">Напишите вопрос на русском или английском — программа превратит его в SQL и покажет результат</p>
+      </div>
+      <div class="input-group">
+        <input type="text" id="queryInput" class="query-input" placeholder="Например: Найди всех сотрудников отдела разработки" autocomplete="off">
+        <button id="submitBtn" class="btn-primary" onclick="submitQuery()">
+          <span class="btn-icon">&#x26A1;</span>
+          <span>Выполнить</span>
+        </button>
+      </div>
+      <div class="quick-tags" id="quickTags"></div>
+    </section>
+
+    <section id="resultsSection" class="results-section" style="display:none">
+      <div class="pipeline" id="pipeline"></div>
+      <div class="card sql-card" id="sqlCard" style="display:none">
+        <div class="card-header">
+          <h2>&#x1F4A1; Сгенерированный SQL</h2>
+        </div>
+        <div class="sql-block">
+          <pre><code id="sqlCode"></code></pre>
+          <button class="btn-copy" onclick="copySQL()" title="Копировать">&#x1F4CB;</button>
+        </div>
+      </div>
+      <div class="card table-card" id="tableCard" style="display:none">
+        <div class="card-header">
+          <h2>&#x1F4CA; Результаты</h2>
+          <span class="row-badge" id="rowBadge"></span>
+        </div>
+        <div class="table-wrapper">
+          <table id="resultTable">
+            <thead id="tableHead"></thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="card schema-card">
+      <div class="card-header">
+        <h2>&#x1F5C2;&#xFE0F; Схема базы данных</h2>
+        <p class="card-desc">Тестовая база данных компании — 4 таблицы с данными</p>
+      </div>
+    <section class="card error-card" id="errorCard" style="display:none">
+      <div class="error-content">
+        <span class="error-icon">&#x274C;</span>
+        <div>
+          <h3>Ошибка</h3>
+          <p id="errorText"></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card schema-card">
+      <div class="card-header">
+        <h2>&#x1F5C2;&#xFE0F; Схема базы данных</h2>
+        <p class="card-desc">Тестовая база данных компании — 4 таблицы с данными</p>
+      </div>
+      <div class="schema-grid" id="schemaGrid">
+        <div class="schema-loading">Загрузка схемы...</div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="footer-content">
+    <span>NL2SQL Prototype &middot; Режим: <strong>Demo</strong></span>
+    <span>База данных: <strong>test_company.db</strong></span>
+  </div>
+</footer>
+
+<script src="/website/script.js"></script>
+</body>
+</html>

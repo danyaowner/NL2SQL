@@ -51,8 +51,14 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
     main_table = tables[0] if tables else "employees"
 
     # Определяем SELECT часть
+    has_project = "project" in text or "проект" in text
     if qtype == "count":
-        select = "COUNT(*) AS count"
+        if "comments" in tables and "задач" in text:
+            select = "t.task_name, COUNT(c.comment_id) AS comment_count"
+        elif has_project and "projects" in tables and "tasks" in tables:
+            select = "p.project_name, COUNT(t.task_id) AS task_count"
+        else:
+            select = "COUNT(*) AS count"
     elif qtype == "aggregate":
         if "средн" in text or "avg" in text or "average" in text:
             if "зарплат" in text or "salary" in text:
@@ -73,8 +79,28 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
         select = "*"
 
     # Определяем FROM и JOIN
-    if len(tables) > 1 or (len(tables) == 1 and qtype == "count" and "проект" in text):
-        if "employees" in tables and "tasks" in tables and "projects" in tables:
+    if len(tables) > 1 or (len(tables) == 1 and qtype == "count" and has_project):
+        if "comments" in tables:
+            if "tasks" in tables:
+                if "кажд" in text or "each" in text or "per" in text:
+                    from_clause = (
+                        "FROM tasks t "
+                        "LEFT JOIN comments c ON t.task_id = c.task_id"
+                    )
+                else:
+                    from_clause = (
+                        "FROM comments c "
+                        "JOIN tasks t ON c.task_id = t.task_id"
+                    )
+            else:
+                from_clause = "FROM comments"
+        elif qtype == "count" and has_project and "projects" in tables and "tasks" in tables:
+            # Count tasks per project - use LEFT JOIN to include projects with 0 tasks
+            from_clause = (
+                "FROM projects p "
+                "LEFT JOIN tasks t ON p.project_id = t.project_id"
+            )
+        elif "employees" in tables and "tasks" in tables and "projects" in tables:
             from_clause = (
                 "FROM employees e "
                 "JOIN tasks t ON e.employee_id = t.assignee_id "
@@ -89,11 +115,6 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
             from_clause = (
                 "FROM projects p "
                 "LEFT JOIN tasks t ON p.project_id = t.project_id"
-            )
-        elif "comments" in tables and "tasks" in tables:
-            from_clause = (
-                "FROM comments c "
-                "JOIN tasks t ON c.task_id = t.task_id"
             )
         else:
             from_clause = f"FROM {main_table}"
@@ -115,7 +136,26 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
             else:
                 where_parts.append(f"priority = '{info['value']}'")
         elif field == "status":
-            where_parts.append(f"status = '{info['value']}'")
+            # Determine which table's status column to use
+            # Only use prefix if there's a JOIN (multiple tables)
+            has_join = "JOIN" in from_clause
+            if has_join and len(tables) > 1:
+                has_tasks = "tasks" in tables
+                has_projects = "projects" in tables
+                if has_tasks and has_projects:
+                    # Both tables have status - check context
+                    if "задач" in text or "task" in text:
+                        where_parts.append(f"t.status = '{info['value']}'")
+                    else:
+                        where_parts.append(f"p.status = '{info['value']}'")
+                elif has_tasks:
+                    where_parts.append(f"t.status = '{info['value']}'")
+                elif has_projects:
+                    where_parts.append(f"p.status = '{info['value']}'")
+                else:
+                    where_parts.append(f"status = '{info['value']}'")
+            else:
+                where_parts.append(f"status = '{info['value']}'")
 
     # Также проверяем упоминания отдела в entities
     for ent in query_info["entities"]:
@@ -128,12 +168,15 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
     if where_parts:
         where = "WHERE " + " AND ".join(where_parts)
 
-    # GROUP BY — фикс: скобки для правильного приоритета
-    has_project = "project" in text or "проект" in text
+    # GROUP BY
     has_department = "отдел" in text or "department" in text
 
     group_by = ""
-    if qtype == "count" and has_project:
+    if qtype == "count" and "comments" in tables and "задач" in text:
+        group_by = "GROUP BY t.task_name"
+    elif qtype == "count" and has_project and "projects" in tables and "tasks" in tables:
+        group_by = "GROUP BY p.project_name"
+    elif qtype == "count" and has_project:
         if "project_name" in str(schema_info.get("columns", {}).get("projects", [])):
             group_by = "GROUP BY p.project_name"
         else:
@@ -145,10 +188,18 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
 
     # ORDER BY и LIMIT для топа
     order_limit = ""
-    if "топ" in text or "top" in text or "best" in text:
-        order_limit = "ORDER BY count DESC LIMIT 3"
-    elif "больше всего" in text or "highest" in text:
-        order_limit = "ORDER BY value DESC LIMIT 1"
+    if "оплач" in text or ("высокоопл" in text):
+        if "сам" in text or "больше всего" in text or "топ" in text or "top" in text:
+            order_limit = "ORDER BY salary DESC"
+            if not "все" in text:
+                order_limit += " LIMIT 5"
+    if not order_limit:
+        if "топ" in text or "top" in text or "best" in text:
+            order_limit = "ORDER BY count DESC LIMIT 3"
+        elif "больше всего" in text or "highest" in text:
+            order_limit = "ORDER BY value DESC LIMIT 1"
+        elif "сам" in text and ("высок" in text or "дорог" in text):
+            order_limit = "ORDER BY salary DESC LIMIT 5"
 
     sql = f"SELECT {select} {from_clause} {where} {group_by} {order_limit}"
     sql = re.sub(r"\s+", " ", sql).strip()

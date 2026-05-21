@@ -21,7 +21,7 @@ TABLE_ALIASES = {
     "employees": ["сотрудник","сотрудники","работник","работники","employee","employees"],
     "projects": ["проект","проекты","project","projects"],
     "tasks": ["задача","задачи","задание","задания","task","tasks"],
-    "comments": ["комментарий","комментарии","comment","comments"],
+    "comments": ["комментари","комментар","comment","comments"],
 }
 
 QUERY_TYPES = {
@@ -113,7 +113,9 @@ def extract_conditions(text: str) -> dict:
         if m:
             conds[field] = {"value": int(m.group(1)), "op": op}
             break
-    if "высок" in tl or "high" in tl or "critical" in tl or "критич" in tl:
+    if "оплач" in tl:
+        conds["salary"] = {"value": 0, "op": ">"}
+    elif "высок" in tl or "high" in tl or "critical" in tl or "критич" in tl:
         conds["priority"] = {"value": "high", "op": "in"}
     elif "средн" in tl or "medium" in tl:
         conds["priority"] = {"value": "medium", "op": "="}
