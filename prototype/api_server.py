@@ -10,6 +10,8 @@ import sys
 import threading
 import urllib.parse
 import webbrowser
+from email import policy
+from email.parser import BytesParser
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -20,9 +22,18 @@ from sql_generator import generate as gen_sql
 import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+DEFAULT_DB = os.path.join(BASE_DIR, "test_company.db")
 
 # Current selected database (None until user uploads one)
 current_db = None
+
+
+def _init_default_database():
+    """Подключить встроенную тестовую БД, если она есть."""
+    global current_db
+    if os.path.exists(DEFAULT_DB):
+        current_db = DEFAULT_DB
 
 
 def get_schema_info():
@@ -198,60 +209,100 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
         else:
             self.send_error(404, "Not found")
 
+    def _read_request_body(self) -> bytes:
+        content_length = int(self.headers.get("Content-Length", 0))
+        if content_length <= 0:
+            return b""
+        old_timeout = self.request.gettimeout() if hasattr(self, "request") else None
+        if hasattr(self, "request"):
+            self.request.settimeout(60)
+        try:
+            return self.rfile.read(content_length)
+        finally:
+            if hasattr(self, "request") and old_timeout is not None:
+                self.request.settimeout(old_timeout)
+
     def _parse_multipart_body(self):
-        """Парсинг multipart/form-data тела запроса.
-        Возвращает dict с ключами: field_name -> значение (str) и 'file' -> (data, filename).
-        """
+        """Парсинг multipart/form-data (Chrome, Firefox, Edge)."""
         content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type.lower():
+            return None
+
+        raw = self._read_request_body()
+        if not raw:
+            return None
+
+        result = {}
+        try:
+            mime_headers = (
+                f"Content-Type: {content_type}\r\n"
+                "MIME-Version: 1.0\r\n\r\n"
+            ).encode("utf-8")
+            message = BytesParser(policy=policy.HTTP).parsebytes(mime_headers + raw)
+            for part in message.iter_parts():
+                cd = part.get("Content-Disposition", "")
+                if not cd:
+                    continue
+                params = {}
+                for item in cd.split(";"):
+                    item = item.strip()
+                    if "=" in item:
+                        key, val = item.split("=", 1)
+                        params[key.strip().lower()] = val.strip().strip('"')
+                name = params.get("name")
+                filename = params.get("filename")
+                payload = part.get_payload(decode=True) or b""
+                if filename:
+                    result["file"] = (payload, filename)
+                elif name:
+                    result[name] = payload.decode("utf-8", errors="replace")
+        except Exception:
+            result = {}
+
+        if result.get("file"):
+            return result
+
+        # Fallback: ручной разбор, если email.parser не справился
         boundary = None
-        for part in content_type.split(";"):
-            part = part.strip()
-            if part.startswith("boundary="):
-                boundary = part[9:].strip('"')
+        for piece in content_type.split(";"):
+            piece = piece.strip()
+            if piece.startswith("boundary="):
+                boundary = piece[9:].strip('"')
                 break
         if not boundary:
             return None
 
-        content_length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(content_length)
-
         b_boundary = ("--" + boundary).encode()
-        b_boundary_end = ("--" + boundary + "--").encode()
-        parts = raw.split(b_boundary)
-
-        result = {}
-        for part in parts:
-            if not part or part.strip() == b"" or b_boundary_end in part:
+        for part in raw.split(b_boundary):
+            if not part or part.strip() in (b"", b"--"):
                 continue
             if b"\r\n\r\n" not in part:
                 continue
             header_bytes, data = part.split(b"\r\n\r\n", 1)
-            # Remove trailing \r\n
             if data.endswith(b"\r\n"):
                 data = data[:-2]
-
             headers_str = header_bytes.decode("utf-8", errors="replace")
             field_name = None
             filename = None
             for line in headers_str.split("\r\n"):
-                if line.lower().startswith("content-disposition:"):
-                    for dp in line.split(";"):
-                        dp = dp.strip()
-                        if dp.startswith("name=\""):
-                            field_name = dp[6:-1]
-                        elif dp.startswith("name="):
-                            field_name = dp[5:]
-                        if dp.startswith("filename=\""):
-                            filename = dp[10:-1]
-                        elif dp.startswith("filename="):
-                            filename = dp[9:]
-
+                if not line.lower().startswith("content-disposition:"):
+                    continue
+                for dp in line.split(";"):
+                    dp = dp.strip()
+                    if dp.startswith('name="'):
+                        field_name = dp[6:-1]
+                    elif dp.startswith("name="):
+                        field_name = dp[5:]
+                    if dp.startswith('filename="'):
+                        filename = dp[10:-1]
+                    elif dp.startswith("filename="):
+                        filename = dp[9:]
             if filename:
                 result["file"] = (data, filename)
             elif field_name:
                 result[field_name] = data.decode("utf-8", errors="replace")
 
-        return result
+        return result if result.get("file") else None
 
     def do_POST(self):
         global current_db
@@ -259,69 +310,92 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
         path = parsed.path
 
         if path == "/api/query":
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length)
-            data = json.loads(body)
-            query = data.get("query", "")
-            if not query.strip():
-                self._send_json({"error": "Запрос не может быть пустым"})
-                return
-            if current_db is None or not os.path.exists(current_db):
-                self._send_json({"error": "База данных не загружена. Загрузите .db файл через /api/upload-database"})
-                return
-            results = process_query_full(query)
-            self._send_json(results)
-        elif path == "/api/upload-database":
-            """Загрузка .db файла через multipart/form-data."""
-            form = self._parse_multipart_body()
-            if not form or "file" not in form:
-                self._send_json({"success": False, "error": "No file uploaded. Use multipart/form-data with a 'file' field."})
-                return
-
-            file_data, original_filename = form["file"]
-            filename = os.path.basename(original_filename)
-
-            # Validate extension
-            if not filename.lower().endswith(".db"):
-                self._send_json({"success": False, "error": "Only .db files are accepted"})
-                return
-
-            # Ensure unique filename
-            save_path = os.path.join(BASE_DIR, filename)
-            counter = 1
-            while os.path.exists(save_path):
-                name, ext = os.path.splitext(filename)
-                save_path = os.path.join(BASE_DIR, f"{name}_{counter}{ext}")
-                counter += 1
-
             try:
-                with open(save_path, "wb") as f:
-                    f.write(file_data)
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                data = json.loads(body)
+                query = data.get("query", "")
+                if not query.strip():
+                    self._send_json({"error": "Запрос не может быть пустым"})
+                    return
+                if current_db is None or not os.path.exists(current_db):
+                    self._send_json({"error": "База данных не загружена. Загрузите .db файл через /api/upload-database"})
+                    return
+                results = process_query_full(query)
+                self._send_json(results)
             except Exception as e:
-                self._send_json({"success": False, "error": f"Failed to save file: {str(e)}"})
-                return
-
-            # Validate it's a real SQLite database
+                self._send_json({"error": f"Ошибка обработки запроса: {str(e)}"})
+        elif path == "/api/upload-database":
             try:
-                conn = sqlite3.connect(save_path)
-                conn.execute("SELECT 1")
-                conn.close()
-            except Exception:
-                os.remove(save_path)
-                self._send_json({"success": False, "error": "File is not a valid SQLite database"})
-                return
-
-            # Set as active database
-            current_db = save_path
-            saved_name = os.path.basename(save_path)
-
-            self._send_json({
-                "success": True,
-                "name": saved_name,
-                "original_name": original_filename
-            })
+                self._handle_upload()
+            except Exception as e:
+                self._send_json({"success": False, "error": f"Ошибка загрузки: {str(e)}"})
         else:
             self.send_error(404, "Not found")
+
+    def _handle_upload(self):
+        """Обработка загрузки .db файла."""
+        global current_db
+        form = self._parse_multipart_body()
+        if not form or "file" not in form:
+            self._send_json({"success": False, "error": "Файл не найден в запросе. Используйте multipart/form-data с полем 'file'."})
+            return
+
+        file_data, original_filename = form["file"]
+        if not file_data:
+            self._send_json({"success": False, "error": "Пустой файл"})
+            return
+
+        filename = os.path.basename(original_filename)
+
+        # Validate extension
+        if not filename.lower().endswith(".db"):
+            self._send_json({"success": False, "error": "Принимаются только .db файлы"})
+            return
+
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+        # Уникальное имя в папке uploads/
+        save_path = os.path.join(UPLOAD_DIR, filename)
+        counter = 1
+        while os.path.exists(save_path):
+            name, ext = os.path.splitext(filename)
+            save_path = os.path.join(UPLOAD_DIR, f"{name}_{counter}{ext}")
+            counter += 1
+
+        try:
+            with open(save_path, "wb") as f:
+                f.write(file_data)
+        except OSError as e:
+            self._send_json({
+                "success": False,
+                "error": (
+                    f"Не удалось сохранить файл: {e}. "
+                    "Закройте файл в других программах или скопируйте его на диск."
+                ),
+            })
+            return
+
+        # Validate it's a real SQLite database
+        try:
+            conn = sqlite3.connect(save_path)
+            conn.execute("SELECT 1")
+            conn.close()
+        except Exception:
+            if os.path.exists(save_path):
+                os.remove(save_path)
+            self._send_json({"success": False, "error": "Файл не является валидной SQLite базой данных"})
+            return
+
+        # Set as active database
+        current_db = save_path
+        saved_name = os.path.basename(save_path)
+
+        self._send_json({
+            "success": True,
+            "name": saved_name,
+            "original_name": original_filename
+        })
 
     def _send_json(self, data):
         self.send_response(200)
@@ -343,11 +417,11 @@ def open_browser():
             explorer = "/mnt/c/Windows/explorer.exe"
             if os.path.exists(explorer):
                 subprocess.Popen([explorer, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                print(f"🌍 Браузер открыт: {url}")
+                print(f"Browser opened: {url}")
                 return
         # Обычный способ
         webbrowser.open(url)
-        print(f"🌍 Браузер открыт: {url}")
+        print(f"Browser opened: {url}")
     except Exception:
         pass
 
@@ -356,13 +430,17 @@ def main():
     port = 8000
     server_address = ("", port)
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    _init_default_database()
     httpd = http.server.HTTPServer(server_address, APIHandler)
-    print("🌐 NL2SQL Prototype Website")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print(f"📡 Сервер запущен: http://localhost:{port}")
-    print(f"📖 Откройте в браузере: http://localhost:{port}")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("💡 Нажмите Ctrl+C для остановки")
+    print("NL2SQL Prototype Website")
+    print("=" * 40)
+    print(f"Server: http://localhost:{port}")
+    if current_db:
+        print(f"Database: {os.path.basename(current_db)} (auto-loaded)")
+    else:
+        print("Database: upload .db on the website")
+    print("Press Ctrl+C to stop")
+    print("=" * 40)
     # Авто-открытие браузера через 1.5 секунды
     threading.Timer(1.5, open_browser).start()
     httpd.serve_forever()

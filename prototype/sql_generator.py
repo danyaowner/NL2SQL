@@ -33,6 +33,8 @@ FEW_SHOT = [
      "SELECT department, AVG(salary) AS avg_salary FROM employees GROUP BY department"),
     ("Найди сотрудников с зарплатой выше 100000",
      "SELECT * FROM employees WHERE salary > 100000"),
+    ("Найди сотрудников с фамилией Иванов",
+     "SELECT * FROM employees WHERE full_name LIKE 'Иванов%'"),
     ("Топ-3 сотрудников по количеству задач",
      "SELECT e.full_name, COUNT(t.task_id) AS task_count "
      "FROM employees e JOIN tasks t ON e.employee_id = t.assignee_id "
@@ -164,6 +166,43 @@ def _demo_generate(query_info: dict, schema_info: dict) -> str:
 
     # WHERE условия
     where_parts = []
+
+    def _column_for_field(field: str) -> str:
+        if field == "full_name":
+            if "employees e" in from_clause:
+                return "e.full_name"
+            return "full_name"
+        if field == "project_name":
+            if " p " in from_clause or "FROM projects p" in from_clause:
+                return "p.project_name"
+            return "project_name"
+        if field == "task_name":
+            if " t " in from_clause or "FROM tasks t" in from_clause:
+                return "t.task_name"
+            return "task_name"
+        if field == "description":
+            if " t " in from_clause:
+                return "t.description"
+            return "description"
+        if field == "comment_text":
+            if " c " in from_clause or "FROM comments c" in from_clause:
+                return "c.comment_text"
+            return "comment_text"
+        return field
+
+    text_filters = query_info.get("text_filters") or {}
+    for field, info in text_filters.items():
+        val = str(info["value"]).replace("'", "''")
+        col = _column_for_field(field)
+        if info.get("op") == "starts_with":
+            # SQLite LOWER() не всегда работает с кириллицей — ищем по префиксу с заглавной буквы
+            prefix = val[0].upper() + val[1:] if val else val
+            where_parts.append(f"{col} LIKE '{prefix}%'")
+        else:
+            where_parts.append(
+                f"LOWER({col}) LIKE '%' || LOWER('{val}') || '%'"
+            )
+
     for field, info in conds.items():
         if field == "salary":
             if main_table == "projects":

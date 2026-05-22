@@ -18,6 +18,7 @@ test_queries = [
     "Средняя зарплата по отделам",
     "Show all employees in sales department",
     "Find projects with budget over 300000",
+    "найди всех сотрудников с фамилией иванов",
 ]
 
 db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_company.db")

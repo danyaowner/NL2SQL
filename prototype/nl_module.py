@@ -189,6 +189,97 @@ def extract_conditions(text: str) -> dict:
         conds["project_id"] = {"value": int(proj_num.group(1)), "op": "="}
     return conds
 
+
+def _capitalize_word(word: str) -> str:
+    if not word:
+        return word
+    return word[0].upper() + word[1:]
+
+
+def _text_field_for_entities(entities: list, text_lower: str) -> str:
+    if "comments" in entities or "комментари" in text_lower:
+        return "comment_text"
+    if "tasks" in entities and "проект" not in text_lower:
+        if "описан" in text_lower:
+            return "description"
+        return "task_name"
+    if "projects" in entities or "проект" in text_lower:
+        return "project_name"
+    return "full_name"
+
+
+def extract_text_filters(text: str, entities: list) -> dict:
+    """Поиск по тексту: фамилия, подстрока в имени/названии и т.д."""
+    filters = {}
+    tl = text.lower()
+
+    m = re.search(
+        r"(?:с\s+)?фамили(?:ей|я|и)\s+([а-яёa-z\-]+)",
+        text,
+        re.IGNORECASE,
+    )
+    if m:
+        surname = m.group(1).strip()
+        if surname:
+            filters["full_name"] = {"value": surname, "op": "starts_with"}
+            return filters
+
+    m = re.search(r"\b(?:with\s+)?surname\s+([a-z\-]+)", text, re.IGNORECASE)
+    if m:
+        filters["full_name"] = {"value": m.group(1).strip(), "op": "starts_with"}
+        return filters
+
+    for pat in (
+        r"в\s+имени\s+которых\s+есть\s+[\"']?([^\"'.!?]+)[\"']?",
+        r"имя\s+которых\s+содержит\s+[\"']?([^\"'.!?]+)[\"']?",
+        r"имени\s+содержит\s+[\"']?([^\"'.!?]+)[\"']?",
+    ):
+        m = re.search(pat, tl)
+        if m:
+            filters["full_name"] = {"value": m.group(1).strip(), "op": "contains"}
+            return filters
+
+    m = re.search(r"описани(?:е|и)\s+содержит\s+[\"']?([^\"'.!?]+)[\"']?", tl)
+    if m:
+        filters["description"] = {"value": m.group(1).strip(), "op": "contains"}
+        return filters
+
+    m = re.search(
+        r"содержа(?:щ|т)(?:ее|ит)?\s+(?:слово\s+)?[\"']?([^\"'.!?]+)[\"']?",
+        tl,
+    )
+    if m:
+        field = _text_field_for_entities(entities, tl)
+        filters[field] = {"value": m.group(1).strip(), "op": "contains"}
+        return filters
+
+    m = re.search(r"со\s+словом\s+[\"']?([^\"'.!?]+)[\"']?", tl)
+    if m:
+        word = m.group(1).strip()
+        if "comments" in entities:
+            filters["comment_text"] = {"value": word, "op": "contains"}
+        elif "tasks" in entities:
+            filters["task_name"] = {"value": word, "op": "contains"}
+        else:
+            filters["comment_text"] = {"value": word, "op": "contains"}
+        return filters
+
+    m = re.search(
+        r"начинающ(?:иеся|ийся|ая|ий)\s+на\s+букву\s+([a-zа-яё])",
+        tl,
+        re.IGNORECASE,
+    )
+    if m:
+        letter = m.group(1)
+        field = "project_name" if (
+            "projects" in entities or "проект" in tl
+        ) else "full_name"
+        filters[field] = {"value": letter, "op": "starts_with"}
+        return filters
+
+    return filters
+
+
 def process_query(text: str) -> dict:
     """Полная обработка запроса."""
     cleaned = clean_query(text)
@@ -196,11 +287,13 @@ def process_query(text: str) -> dict:
     entities = extract_entities(cleaned)
     qtype = classify_query(cleaned, lang)
     conds = extract_conditions(cleaned)
+    text_filters = extract_text_filters(cleaned, entities)
     nums = extract_numbers(cleaned)
     return {
         "original": text, "cleaned": cleaned,
         "language": lang, "entities": entities,
         "query_type": qtype, "conditions": conds,
+        "text_filters": text_filters,
         "numbers": nums,
     }
 

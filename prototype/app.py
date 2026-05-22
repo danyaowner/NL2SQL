@@ -23,11 +23,11 @@ except Exception:
 
 # ---------- init DB if needed ----------
 if HAS_DB and not os.path.exists(DB_PATH):
-    from init_db import main as init_db
+    from init_db import init_database
     try:
-        init_db()
-    except Exception:
-        pass
+        init_database()
+    except Exception as e:
+        print(f"[!] DB init failed: {e}")
 
 # ---------- lazy imports ----------
 try:

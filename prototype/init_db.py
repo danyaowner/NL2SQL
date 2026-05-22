@@ -150,17 +150,25 @@ def get_schema():
         "comments": {"columns": ["comment_id","task_id","author_id","comment_text","created_at","is_internal"],"pk":"comment_id","fk":{"task_id":"tasks","author_id":"employees"}},
     }
 
+def init_database():
+    """Создание/пересоздание БД (без argparse — для вызова из app.py)."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    create_tables(cur)
+    insert_data(cur)
+    conn.commit()
+    conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--clean", action="store_true")
     args = parser.parse_args()
     if args.clean and os.path.exists(DB_PATH):
         os.remove(DB_PATH)
+    init_database()
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    create_tables(cur)
-    insert_data(cur)
-    conn.commit()
     for t in ["employees","projects","tasks","comments"]:
         cnt = cur.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
         print(f"  {t}: {cnt} rows")

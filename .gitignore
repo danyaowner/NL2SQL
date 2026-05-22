@@ -25,6 +25,7 @@ streamlit.log
 # Database
 *.db
 *.sqlite
+prototype/uploads/
 
 # OS
 .DS_Store

@@ -1,39 +1,31 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+set PYTHONUTF8=1
 
 echo ======================================
 echo   NL2SQL Prototype
 echo ======================================
 echo.
-echo [1/2] Запуск сервера на http://localhost:8000
+echo Starting server at http://localhost:8000
+echo Browser will open automatically...
 echo.
 
-:: Открыть браузер
-start "" http://localhost:8000
-
-:: Запуск сервера
-python api_server.py
-
-:: Если Python не найден — пробуем python3
+py api_server.py
+if errorlevel 1 (
+    python api_server.py
+)
 if errorlevel 1 (
     python3 api_server.py
 )
-
-:: Если всё равно ошибка
 if errorlevel 1 (
     cls
     echo ======================================
-    echo   ОШИБКА ЗАПУСКА
+    echo   START ERROR
     echo ======================================
     echo.
-    echo Python не найден. Установите Python 3:
+    echo Python not found. Install from:
     echo https://www.python.org/downloads/
-    echo.
-    echo Или запустите вручную:
-    echo   cd prototype
-    echo   python api_server.py
     echo.
     pause
 )
-

@@ -3,10 +3,6 @@ const API = {
     const res = await fetch("/api/schema");
     return res.json();
   },
-  async health() {
-    const res = await fetch("/api/health");
-    return res.json();
-  },
   async submitQuery(query) {
     const res = await fetch("/api/query", {
       method: "POST",
@@ -30,16 +26,32 @@ const API = {
       };
 
       xhr.onload = function() {
+        var text = xhr.responseText || "";
         try {
-          var result = JSON.parse(xhr.responseText);
+          var result = JSON.parse(text);
+          if (xhr.status >= 400) {
+            reject(new Error(result.error || ("HTTP " + xhr.status)));
+            return;
+          }
           resolve(result);
         } catch (e) {
-          reject(new Error("Invalid server response"));
+          if (xhr.status === 0) {
+            reject(new Error(
+              "Сервер не отвечает. Запустите: py api_server.py в папке prototype"
+            ));
+          } else {
+            reject(new Error(
+              "Некорректный ответ сервера (HTTP " + xhr.status + ")"
+            ));
+          }
         }
       };
 
       xhr.onerror = function() {
-        reject(new Error("Upload failed"));
+        reject(new Error(
+          "Не удалось отправить файл. Убедитесь, что сервер запущен " +
+          "(http://localhost:8000) и страница открыта через localhost, не как файл."
+        ));
       };
 
       xhr.send(formData);
@@ -57,13 +69,13 @@ const QUICK_QUERIES = [
 
 // ─── Init ────────────────────────────────────────────────────────────
 
-window.addEventListener("DOMContentLoaded", async () => {
-  await checkHealth();
+window.addEventListener("DOMContentLoaded", function() {
+  checkHealthAndInit();
   renderQuickTags();
   initUpload();
-  const input = document.getElementById("queryInput");
+  var input = document.getElementById("queryInput");
   if (input) {
-    input.addEventListener("keydown", (e) => {
+    input.addEventListener("keydown", function(e) {
       if (e.key === "Enter") submitQuery();
     });
   }
@@ -202,19 +214,36 @@ function setQuery(el) {
 }
 
 async function checkHealth() {
+  await checkHealthAndInit();
+}
+
+async function checkHealthAndInit() {
+  var dot = document.getElementById("statusDot");
+  var text = document.getElementById("statusText");
   try {
-    var status = await API.health();
-    var dot = document.getElementById("statusDot");
-    var text = document.getElementById("statusText");
+    const controller = new AbortController();
+    const timeout = setTimeout(function() { controller.abort(); }, 5000);
+    var res = await fetch("/api/health", { signal: controller.signal });
+    clearTimeout(timeout);
+    var status = await res.json();
     if (status.status === "ok") {
-      dot.className = "status-dot online";
-      text.textContent = "Сервер подключен";
+      if (dot) dot.className = "status-dot online";
+      if (text) text.textContent = status.db_loaded
+        ? "Сервер подключен, БД: " + status.current_db
+        : "Сервер подключен";
+      if (status.db_loaded && status.current_db) {
+        onDatabaseLoaded(status.current_db);
+      }
     }
   } catch (e) {
-    var dot = document.getElementById("statusDot");
-    var text = document.getElementById("statusText");
     if (dot) dot.className = "status-dot offline";
     if (text) text.textContent = "Сервер не доступен";
+    var uploadScreen = document.getElementById("uploadScreen");
+    if (uploadScreen && uploadScreen.style.display !== "none") {
+      showUploadError(
+        "Сервер не запущен. Откройте терминал в папке prototype и выполните: py api_server.py"
+      );
+    }
   }
 }
 
