@@ -30,6 +30,7 @@ prototype/uploads/
 # OS
 .DS_Store
 Thumbs.db
+server.pid
 
 # Word documents (generated)
 *.docx
