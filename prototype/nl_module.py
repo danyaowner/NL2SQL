@@ -27,7 +27,7 @@ TABLE_ALIASES = {
 QUERY_TYPES = {
     "count": ["сколько","количество","сколько всего","число","посчитай","how many","count","total"],
     "find": ["найди","покажи","выведи","найти","отобрази","find","show","display","get","list"],
-    "aggregate": ["сумма","среднее","максимум","минимум","avg","sum","average","maximum","minimum","итог","общий","общая","всего","итого"],
+    "aggregate": ["сумма","среднее","средняя","средний","среднюю","максимум","минимум","avg","sum","average","maximum","minimum","итог","общий","общая","всего","итого"],
     "compare": ["сравни","кто больше","выше чем","топ","compare","top","highest","lowest"],
 }
 
@@ -40,16 +40,16 @@ def clean_query(text: str) -> str:
 
 def detect_language(text: str) -> str:
     """Определение языка."""
+    # Приоритет: если есть кириллица — это русский
+    if re.search(r"[а-яА-ЯёЁ]", text):
+        return "ru"
     if HAS_LANGDETECT:
         try:
             lang = _detect_lang(text)
             if lang == "ru":
                 return "ru"
-            return "en"
         except Exception:
             pass
-    if re.search(r"[а-яА-Я]", text):
-        return "ru"
     return "en"
 
 def extract_entities(text: str) -> list:
@@ -121,7 +121,7 @@ def extract_conditions(text: str) -> dict:
         (r"salary\s*(?:below|less|<)\s*(\d+)", "salary", "<"),
         (r"бюджет[а-я]*\s*(?:выше|больше|>)\s*(\d+)", "budget", ">"),
         (r"бюджет[а-я]*\s*(?:ниже|меньше|<)\s*(\d+)", "budget", "<"),
-        (r"budget\s*(?:above|greater|>)\s*(\d+)", "budget", ">"),
+        (r"budget\s*(?:above|greater|>|over|more\s+than)\s*(\d+)", "budget", ">"),
         (r"budget\s*(?:below|less|<)\s*(\d+)", "budget", "<"),
     ]
     for pat, field, op in pats:
@@ -137,7 +137,8 @@ def extract_conditions(text: str) -> dict:
             break
     
     if not has_field_prefix:
-        for m in re.finditer(r">\s*(\d+)\s*к?\b", tl):
+        # Extract numbers after "over"/"more than"/">"
+        for m in re.finditer(r"(?:over|more\s+than|>)\s*(\d+)\s*к?\b", tl):
             val = int(m.group(1))
             # Check if there's a "к" suffix (100к = 100000)
             after_digit = tl[m.end(1):m.end()]

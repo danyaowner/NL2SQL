@@ -1,10 +1,20 @@
-# NL2SQL Prototype Dependencies
-# Core
-openai>=1.0.0
-streamlit>=1.28.0
-sqlparse>=0.4.4
+# NL2SQL — Neural NL→SQL Converter
+# Зависимости для курсовой работы
 
-# NLP
-langdetect>=1.0.9
-nltk>=3.8.0
-dateparser>=1.1.0
+# Веб-фреймворк
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+
+# LLM: Google Gemini (новый SDK предпочтителен, legacy — запасной)
+google-genai>=1.0.0
+# google-generativeai>=0.8.0  # legacy, если google-genai не работает
+
+# Работа с SQL
+sqlparse>=0.5.0
+
+# Переменные окружения
+python-dotenv>=1.0.0
+
+# Валидация данных
+pydantic>=2.0.0

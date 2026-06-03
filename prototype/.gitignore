@@ -1,0 +1,8 @@
+.vercel
+.env
+*.db
+__pycache__/
+server.log
+*.pyc
+*.egg-info/
+uploads/

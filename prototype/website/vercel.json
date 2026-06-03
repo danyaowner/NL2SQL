@@ -1,0 +1,11 @@
+{
+  "buildCommand": null,
+  "outputDirectory": "website",
+  "framework": null,
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "https://nl2sql-backend.onrender.com/api/$1"
+    }
+  ]
+}

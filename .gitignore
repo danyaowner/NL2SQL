@@ -27,6 +27,12 @@ streamlit.log
 *.sqlite
 prototype/uploads/
 
+# Environment files with secrets
+.env
+
+# Server logs
+*.log
+
 # OS
 .DS_Store
 Thumbs.db
@@ -34,3 +40,7 @@ server.pid
 
 # Word documents (generated)
 *.docx
+
+# Personal documents / coursework
+*.pdf
+coursework_text/

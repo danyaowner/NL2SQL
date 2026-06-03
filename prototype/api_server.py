@@ -7,6 +7,7 @@ import http.server
 import json
 import os
 import sys
+import tempfile
 import threading
 import urllib.parse
 import webbrowser
@@ -22,7 +23,7 @@ from sql_generator import generate as gen_sql
 import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(tempfile.gettempdir(), "nl2sql_uploads"))
 DEFAULT_DB = os.path.join(BASE_DIR, "test_company.db")
 
 # Current selected database (None until user uploads one)
@@ -207,6 +208,12 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
             self.path = path
             return super().do_GET()
         else:
+            # Try serving from website/ directory (supports root-relative paths like /styles.css)
+            static_path = "/website" + path
+            full_path = os.path.join(BASE_DIR, static_path.lstrip("/"))
+            if os.path.exists(full_path) and not os.path.isdir(full_path):
+                self.path = static_path
+                return super().do_GET()
             self.send_error(404, "Not found")
 
     def _read_request_body(self) -> bytes:
@@ -355,7 +362,7 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
 
         os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-        # Уникальное имя в папке uploads/
+        # Сохраняем во временную папку
         save_path = os.path.join(UPLOAD_DIR, filename)
         counter = 1
         while os.path.exists(save_path):
@@ -427,22 +434,23 @@ def open_browser():
 
 
 def main():
-    port = 8000
+    port = int(os.environ.get("PORT", 8000))
     server_address = ("", port)
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     _init_default_database()
     httpd = http.server.HTTPServer(server_address, APIHandler)
     print("NL2SQL Prototype Website")
     print("=" * 40)
-    print(f"Server: http://localhost:{port}")
+    print(f"Server: http://0.0.0.0:{port}")
     if current_db:
         print(f"Database: {os.path.basename(current_db)} (auto-loaded)")
     else:
         print("Database: upload .db on the website")
     print("Press Ctrl+C to stop")
     print("=" * 40)
-    # Авто-открытие браузера через 1.5 секунды
-    threading.Timer(1.5, open_browser).start()
+    # Авто-открытие браузера через 1.5 секунды (только для localhost)
+    if port == 8000:
+        threading.Timer(1.5, open_browser).start()
     httpd.serve_forever()
 
 

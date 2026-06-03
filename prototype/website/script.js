@@ -1,23 +1,41 @@
+// ─── Configuration ────────────────────────────────────────────────────
+const API_BASE_URL = window.__API_BACKEND_URL || '';
+
 const API = {
+  _url(path) {
+    return API_BASE_URL + '/api/' + path;
+  },
   async getSchema() {
-    const res = await fetch("/api/schema");
+    const res = await fetch(API._url('schema'));
+    if (!res.ok) {
+      const err = await res.json().catch(function() { return {}; });
+      throw new Error(err.detail || 'Schema fetch error');
+    }
+    return res.json();
+  },
+  async getHealth() {
+    const res = await fetch(API._url('health'));
     return res.json();
   },
   async submitQuery(query) {
-    const res = await fetch("/api/query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+    const res = await fetch(API._url('query'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: query }),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(function() { return {}; });
+      throw new Error(err.detail || 'Query error (' + res.status + ')');
+    }
     return res.json();
   },
   async uploadDatabase(file, onProgress) {
     return new Promise(function(resolve, reject) {
       var formData = new FormData();
-      formData.append("file", file);
+      formData.append('file', file);
 
       var xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/upload-database");
+      xhr.open('POST', API._url('upload-database'));
 
       xhr.upload.onprogress = function(e) {
         if (onProgress && e.lengthComputable) {
@@ -26,32 +44,21 @@ const API = {
       };
 
       xhr.onload = function() {
-        var text = xhr.responseText || "";
+        var text = xhr.responseText || '';
         try {
           var result = JSON.parse(text);
           if (xhr.status >= 400) {
-            reject(new Error(result.error || ("HTTP " + xhr.status)));
+            reject(new Error(result.error || ('HTTP ' + xhr.status)));
             return;
           }
           resolve(result);
         } catch (e) {
-          if (xhr.status === 0) {
-            reject(new Error(
-              "Сервер не отвечает. Запустите: py api_server.py в папке prototype"
-            ));
-          } else {
-            reject(new Error(
-              "Некорректный ответ сервера (HTTP " + xhr.status + ")"
-            ));
-          }
+          reject(new Error('Invalid server response (HTTP ' + xhr.status + ')'));
         }
       };
 
       xhr.onerror = function() {
-        reject(new Error(
-          "Не удалось отправить файл. Убедитесь, что сервер запущен " +
-          "(http://localhost:8000) и страница открыта через localhost, не как файл."
-        ));
+        reject(new Error('Upload failed. Check backend connection.'));
       };
 
       xhr.send(formData);
@@ -64,19 +71,28 @@ const QUICK_QUERIES = [
   "Сколько задач в каждом проекте",
   "Средняя зарплата по отделам",
   "Покажи сотрудников с зарплатой выше 100000",
-  "Find all employees in sales department",
+  "Топ-5 проектов по бюджету",
 ];
+
+const PIPELINE_ICONS = {
+  'Preprocessing': '🔍',
+  'Schema': '📚',
+  'Prompt': '📝',
+  'LLM Generation': '🤖',
+  'Validation': '✅',
+  'Execution': '🚀',
+};
 
 // ─── Init ────────────────────────────────────────────────────────────
 
-window.addEventListener("DOMContentLoaded", function() {
+window.addEventListener('DOMContentLoaded', function() {
   checkHealthAndInit();
   renderQuickTags();
   initUpload();
-  var input = document.getElementById("queryInput");
+  var input = document.getElementById('queryInput');
   if (input) {
-    input.addEventListener("keydown", function(e) {
-      if (e.key === "Enter") submitQuery();
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') submitQuery();
     });
   }
 });
@@ -84,51 +100,43 @@ window.addEventListener("DOMContentLoaded", function() {
 // ─── Upload Screen ───────────────────────────────────────────────────
 
 function initUpload() {
-  var dropZone = document.getElementById("dbDropZone");
-  var fileInput = document.getElementById("dbFileInput");
+  var dropZone = document.getElementById('dbDropZone');
+  var fileInput = document.getElementById('dbFileInput');
   if (!dropZone) return;
 
-  // Click to browse
-  dropZone.addEventListener("click", function() {
+  dropZone.addEventListener('click', function() {
     fileInput.click();
   });
 
-  fileInput.addEventListener("change", function() {
+  fileInput.addEventListener('change', function() {
     if (fileInput.files.length > 0) {
       startUpload(fileInput.files[0]);
-      fileInput.value = "";
+      fileInput.value = '';
     }
   });
 
-  // Drag events
-  dropZone.addEventListener("dragenter", function(e) {
+  dropZone.addEventListener('dragenter', function(e) {
     e.preventDefault();
-    e.stopPropagation();
-    dropZone.classList.add("db-dragover");
+    dropZone.classList.add('db-dragover');
   });
 
-  dropZone.addEventListener("dragover", function(e) {
+  dropZone.addEventListener('dragover', function(e) {
     e.preventDefault();
-    e.stopPropagation();
-    dropZone.classList.add("db-dragover");
+    dropZone.classList.add('db-dragover');
   });
 
-  dropZone.addEventListener("dragleave", function(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    dropZone.classList.remove("db-dragover");
+  dropZone.addEventListener('dragleave', function(e) {
+    dropZone.classList.remove('db-dragover');
   });
 
-  dropZone.addEventListener("drop", function(e) {
+  dropZone.addEventListener('drop', function(e) {
     e.preventDefault();
-    e.stopPropagation();
-    dropZone.classList.remove("db-dragover");
-
+    dropZone.classList.remove('db-dragover');
     var files = e.dataTransfer.files;
     if (files.length > 0) {
       var file = files[0];
-      if (!file.name.toLowerCase().endsWith(".db")) {
-        showUploadError("Только .db файлы принимаются");
+      if (!file.name.toLowerCase().endsWith('.db')) {
+        showUploadError('Only .db files accepted');
         return;
       }
       startUpload(file);
@@ -137,34 +145,33 @@ function initUpload() {
 }
 
 async function startUpload(file) {
-  var dropZone = document.getElementById("dbDropZone");
-  var uploadStatus = document.getElementById("dbUploadStatus");
-  var progressFill = document.getElementById("dbUploadProgress");
-  var progressText = document.getElementById("dbUploadText");
-  var errorEl = document.getElementById("dbError");
+  var dropZone = document.getElementById('dbDropZone');
+  var uploadStatus = document.getElementById('dbUploadStatus');
+  var progressFill = document.getElementById('dbUploadProgress');
+  var progressText = document.getElementById('dbUploadText');
+  var errorEl = document.getElementById('dbError');
 
-  errorEl.style.display = "none";
-  dropZone.style.display = "none";
-  uploadStatus.style.display = "block";
-  progressFill.style.width = "0%";
-  progressText.textContent = "Загрузка " + file.name + "...";
+  errorEl.style.display = 'none';
+  dropZone.style.display = 'none';
+  uploadStatus.style.display = 'block';
+  progressFill.style.width = '0%';
+  progressText.textContent = 'Uploading ' + file.name + '...';
 
   try {
     var result = await API.uploadDatabase(file, function(pct) {
-      progressFill.style.width = pct + "%";
-      progressText.textContent = "Загрузка " + file.name + "... " + pct + "%";
+      progressFill.style.width = pct + '%';
+      progressText.textContent = 'Uploading... ' + pct + '%';
     });
 
     if (result.success) {
-      progressFill.style.width = "100%";
-      progressText.textContent = "✅ " + result.name + " загружена!";
+      progressFill.style.width = '100%';
+      progressText.textContent = '✅ ' + result.name + ' loaded!';
 
-      // Switch to main interface
       setTimeout(function() {
         onDatabaseLoaded(result.name);
       }, 600);
     } else {
-      showUploadError(result.error || "Ошибка загрузки");
+      showUploadError(result.error || 'Upload error');
     }
   } catch (e) {
     showUploadError(e.message);
@@ -172,124 +179,131 @@ async function startUpload(file) {
 }
 
 function showUploadError(msg) {
-  var dropZone = document.getElementById("dbDropZone");
-  var uploadStatus = document.getElementById("dbUploadStatus");
-  var errorEl = document.getElementById("dbError");
+  var dropZone = document.getElementById('dbDropZone');
+  var uploadStatus = document.getElementById('dbUploadStatus');
+  var errorEl = document.getElementById('dbError');
 
-  dropZone.style.display = "";
-  uploadStatus.style.display = "none";
-  errorEl.style.display = "block";
-  errorEl.textContent = "❌ " + msg;
+  dropZone.style.display = '';
+  uploadStatus.style.display = 'none';
+  errorEl.style.display = 'block';
+  errorEl.textContent = '❌ ' + msg;
 }
 
 function onDatabaseLoaded(name) {
-  // Hide upload screen, show main interface
-  document.getElementById("uploadScreen").style.display = "none";
-  document.getElementById("mainContent").style.display = "";
+  document.getElementById('uploadScreen').style.display = 'none';
+  document.getElementById('mainContent').style.display = '';
 
-  // Update status
-  var statusText = document.getElementById("statusText");
-  if (statusText) statusText.textContent = "БД: " + name;
+  var statusText = document.getElementById('statusText');
+  if (statusText) statusText.textContent = 'DB: ' + name;
 
-  var schemaDesc = document.getElementById("schemaDesc");
-  if (schemaDesc) schemaDesc.textContent = "Таблицы базы: " + name;
+  var schemaDesc = document.getElementById('schemaDesc');
+  if (schemaDesc) schemaDesc.textContent = 'Auto-detected from: ' + name;
 
-  // Load schema
   loadSchema();
 }
 
 // ─── Query Interface ─────────────────────────────────────────────────
 
 function renderQuickTags() {
-  var container = document.getElementById("quickTags");
+  var container = document.getElementById('quickTags');
   if (!container) return;
   container.innerHTML = QUICK_QUERIES.map(function(q) {
-    return '<span class="tag" onclick="setQuery(this)">' + q + "</span>";
-  }).join("");
+    return '<span class="tag" onclick="setQuery(this)">' + q + '</span>';
+  }).join('');
 }
 
 function setQuery(el) {
-  document.getElementById("queryInput").value = el.textContent;
+  document.getElementById('queryInput').value = el.textContent;
   submitQuery();
 }
 
-async function checkHealth() {
-  await checkHealthAndInit();
-}
-
 async function checkHealthAndInit() {
-  var dot = document.getElementById("statusDot");
-  var text = document.getElementById("statusText");
+  var dot = document.getElementById('statusDot');
+  var text = document.getElementById('statusText');
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(function() { controller.abort(); }, 5000);
-    var res = await fetch("/api/health", { signal: controller.signal });
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, 5000);
+    var res = await fetch(API_BASE_URL + '/api/health', { signal: controller.signal });
     clearTimeout(timeout);
     var status = await res.json();
-    if (status.status === "ok") {
-      if (dot) dot.className = "status-dot online";
-      if (text) text.textContent = status.db_loaded
-        ? "Сервер подключен, БД: " + status.current_db
-        : "Сервер подключен";
-      if (status.db_loaded && status.current_db) {
-        onDatabaseLoaded(status.current_db);
+    if (status.status === 'ok') {
+      if (dot) dot.className = 'status-dot online';
+      if (status.api_key_configured) {
+        if (text) text.textContent = status.db_loaded
+          ? 'Neural (Gemini) | DB: ' + (status.db_path || '').split('/').pop()
+          : 'Neural (Gemini) | No DB';
+      } else {
+        if (text) text.textContent = status.db_loaded
+          ? 'API key missing!' : 'Server OK';
+      }
+      if (status.db_loaded) {
+        onDatabaseLoaded((status.db_path || 'database.db').split('/').pop());
       }
     }
   } catch (e) {
-    if (dot) dot.className = "status-dot offline";
-    if (text) text.textContent = "Сервер не доступен";
-    var uploadScreen = document.getElementById("uploadScreen");
-    if (uploadScreen && uploadScreen.style.display !== "none") {
-      showUploadError(
-        "Сервер не запущен. Откройте терминал в папке prototype и выполните: py api_server.py"
-      );
-    }
+    if (dot) dot.className = 'status-dot offline';
+    if (text) text.textContent = 'Server offline';
+    showUploadError('Server not reachable. Start: python run.py');
   }
 }
 
 async function loadSchema() {
   try {
     var schema = await API.getSchema();
-    var grid = document.getElementById("schemaGrid");
-    grid.innerHTML = "";
-    Object.entries(schema).forEach(function(entry) {
+    var grid = document.getElementById('schemaGrid');
+    grid.innerHTML = '';
+
+    if (!schema.tables || Object.keys(schema.tables).length === 0) {
+      grid.innerHTML = '<div class="schema-loading">No tables found in database</div>';
+      return;
+    }
+
+    Object.entries(schema.tables).forEach(function(entry) {
       var name = entry[0];
       var info = entry[1];
-      var card = document.createElement("div");
-      card.className = "schema-table";
-      var colEntries = Object.entries(info.columns).slice(0, 8);
-      var lis = "";
-      for (var i = 0; i < colEntries.length; i++) {
-        lis += "<li>" + colEntries[i][0] + ": " + colEntries[i][1] + "</li>";
+      var card = document.createElement('div');
+      card.className = 'schema-table';
+
+      var cols = info.columns || [];
+      var lis = '';
+      for (var i = 0; i < cols.length; i++) {
+        lis += '<li>' + cols[i] + '</li>';
       }
-      card.innerHTML = "<h3>" + name + '</h3><div class="table-desc">' + info.description + "</div><ul>" + lis + "</ul>";
+
+      card.innerHTML =
+        '<h3>' + name + '</h3>' +
+        '<div class="table-desc">' + (info.row_count || 0) + ' records</div>' +
+        '<ul>' + lis + '</ul>';
       grid.appendChild(card);
     });
   } catch (e) {
-    var grid = document.getElementById("schemaGrid");
-    if (grid) grid.innerHTML = '<div class="schema-loading" style="color:var(--red)">Error loading schema</div>';
+    var grid = document.getElementById('schemaGrid');
+    if (grid) grid.innerHTML = '<div class="schema-loading" style="color:var(--red)">Error loading schema: ' + e.message + '</div>';
   }
 }
 
 // ─── Query Submission ────────────────────────────────────────────────
 
 async function submitQuery() {
-  var input = document.getElementById("queryInput");
+  var input = document.getElementById('queryInput');
   var query = input.value.trim();
   if (!query) return;
-  var btn = document.getElementById("submitBtn");
+
+  var btn = document.getElementById('submitBtn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="step-loader" style="width:18px;height:18px;border-width:2px"></span> Выполнение...';
-  document.getElementById("resultsSection").style.display = "none";
-  document.getElementById("errorCard").style.display = "none";
+  btn.innerHTML = '<span class="step-loader" style="width:18px;height:18px;border-width:2px"></span> Processing...';
+
+  document.getElementById('resultsSection').style.display = 'none';
+  document.getElementById('errorCard').style.display = 'none';
+
   try {
     var result = await API.submitQuery(query);
     renderResults(result);
   } catch (e) {
-    showError("Connection error");
+    showError(e.message || 'Connection error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<span class="btn-icon">&#x26A1;</span> Выполнить';
+    btn.innerHTML = '<span class="btn-icon">⚡</span> Run';
   }
 }
 
@@ -298,91 +312,111 @@ function renderResults(result) {
     showError(result.error);
     return;
   }
-  document.getElementById("resultsSection").style.display = "flex";
-  var pipeline = document.getElementById("pipeline");
-  var html = "";
+
+  document.getElementById('resultsSection').style.display = 'flex';
+
+  // Render pipeline steps
+  var pipeline = document.getElementById('pipeline');
+  var html = '';
+
   for (var s = 0; s < result.steps.length; s++) {
     var step = result.steps[s];
-    var st = "";
-    var dh = "";
-    if (step.status === "success") st = "Done";
-    else if (step.status === "warning") st = "Warning: " + (step.message || "");
-    else if (step.status === "error") st = "Error: " + (step.error || "");
-    if (step.details) {
-      var ents = Object.entries(step.details);
-      dh = '<dl class="step-details">';
-      for (var i = 0; i < ents.length; i++) dh += "<dt>" + ents[i][0] + "</dt><dd>" + ents[i][1] + "</dd>";
-      dh += "</dl>";
-    }
+    var icon = PIPELINE_ICONS[step.name] || '⚙️';
+    var statusClass = step.status === 'success' ? 'success' : step.status;
+    var statusColor = step.status === 'success' ? 'var(--green)' : 'var(--red)';
+    var statusText = step.status === 'success' ? step.detail || 'OK' : step.detail || 'Error';
+    var timingMs = step.ms || 0;
+
+    html += '<div class="pipeline-step ' + statusClass + '">';
+    html += '<div class="step-icon">' + icon + '</div>';
+    html += '<div class="step-content">';
+    html += '<div class="step-name">' + step.name + ' <span style="font-size:11px;color:var(--text2);font-weight:400">(' + timingMs + 'ms)</span></div>';
+    html += '<div class="step-status"><span style="color:' + statusColor + '">' + statusText + '</span></div>';
+
+    // Extra info
     if (step.tables) {
-      dh += '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">';
-      for (var i = 0; i < step.tables.length; i++) {
-        dh += '<span style="padding:4px 10px;background:var(--surface2);border-radius:6px;font-size:12px;border:1px solid var(--border)">' + step.tables[i].name + "</span>";
+      html += '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">';
+      for (var t = 0; t < step.tables.length; t++) {
+        html += '<span style="padding:3px 10px;background:var(--surface2);border-radius:6px;font-size:12px;border:1px solid var(--border)">' + step.tables[t] + '</span>';
       }
-      dh += "</div>";
+      html += '</div>';
     }
-    if (step.sql) {
-      dh = '<pre style="margin-top:8px;background:#0d1117;padding:8px 12px;border-radius:6px;font-family:\'JetBrains Mono\',monospace;font-size:13px;color:#7ec699;overflow-x:auto">' + step.sql + "</pre>";
-    }
-    if (step.valid !== undefined) {
-      st = step.valid ? "Valid and safe" : "Warning: " + (step.message || "Problem");
-    }
-    if (step.row_count !== undefined) {
-      st = "Got " + step.row_count + " rows";
-    }
-    if (step.error) st = "Error: " + step.error;
-    var sc = step.status === "success" ? "var(--green)" : step.status === "warning" ? "var(--orange)" : step.status === "error" ? "var(--red)" : "var(--text2)";
-    html += '<div class="pipeline-step ' + step.status + '"><div class="step-icon">' + step.icon + '</div><div class="step-content"><div class="step-name">' + step.name + '</div><div class="step-status"><span class="step-status-text" style="color:' + sc + '">' + st + "</span></div>" + dh + "</div></div>";
+
+    html += '</div></div>';
   }
+
+  // Total timing
+  if (result.timing_ms) {
+    html += '<div style="text-align:right;font-size:12px;color:var(--text2);margin-top:4px">Total: ' + result.timing_ms + 'ms</div>';
+  }
+
   pipeline.innerHTML = html;
-  if (result.sql) {
-    document.getElementById("sqlCard").style.display = "";
-    document.getElementById("sqlCode").textContent = result.sql;
+
+  // Show SQL
+  if (result.formatted_sql) {
+    document.getElementById('sqlCard').style.display = '';
+    document.getElementById('sqlCode').textContent = result.formatted_sql;
+  } else if (result.sql) {
+    document.getElementById('sqlCard').style.display = '';
+    document.getElementById('sqlCode').textContent = result.sql;
   }
+
+  // Show results table
   if (result.rows && result.rows.length > 0) {
-    var tc = document.getElementById("tableCard");
-    tc.style.display = "";
-    document.getElementById("rowBadge").textContent = result.rows.length + " rows";
-    var cols = Object.keys(result.rows[0]);
-    var th = "<tr>";
-    for (var i = 0; i < cols.length; i++) th += "<th>" + cols[i] + "</th>";
-    th += "</tr>";
-    document.getElementById("tableHead").innerHTML = th;
-    var tb = "";
+    var tc = document.getElementById('tableCard');
+    tc.style.display = '';
+    document.getElementById('rowBadge').textContent = result.rows.length + ' rows';
+
+    var cols = result.columns || Object.keys(result.rows[0]);
+    var th = '<tr>';
+    for (var i = 0; i < cols.length; i++) th += '<th>' + cols[i] + '</th>';
+    th += '</tr>';
+    document.getElementById('tableHead').innerHTML = th;
+
+    var tb = '';
     for (var r = 0; r < result.rows.length; r++) {
-      tb += "<tr>";
-      for (var c = 0; c < cols.length; c++) tb += "<td>" + (result.rows[r][cols[c]] || "") + "</td>";
-      tb += "</tr>";
+      tb += '<tr>';
+      for (var c = 0; c < cols.length; c++) {
+        var val = result.rows[r][cols[c]];
+        tb += '<td>' + (val !== null && val !== undefined ? val : '') + '</td>';
+      }
+      tb += '</tr>';
     }
-    document.getElementById("tableBody").innerHTML = tb;
-    tc.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById('tableBody').innerHTML = tb;
+    tc.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } else if (result.success) {
-    document.getElementById("tableCard").style.display = "";
-    document.getElementById("rowBadge").textContent = "0 rows";
-    document.getElementById("tableHead").innerHTML = "";
-    document.getElementById("tableBody").innerHTML = '<tr><td colspan="100" style="text-align:center;padding:40px;color:var(--text2)">No data found</td></tr>';
+    document.getElementById('tableCard').style.display = '';
+    document.getElementById('rowBadge').textContent = '0 rows';
+    document.getElementById('tableHead').innerHTML = '';
+    document.getElementById('tableBody').innerHTML = '<tr><td colspan="100" style="text-align:center;padding:40px;color:var(--text2)">No data returned</td></tr>';
   }
 }
 
 function showError(msg) {
-  var card = document.getElementById("errorCard");
-  card.style.display = "";
-  document.getElementById("errorText").textContent = msg;
-  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  var card = document.getElementById('errorCard');
+  card.style.display = '';
+  document.getElementById('errorText').textContent = msg;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 async function copySQL() {
-  var sql = document.getElementById("sqlCode").textContent;
+  var sql = document.getElementById('sqlCode').textContent;
   try {
     await navigator.clipboard.writeText(sql);
-    var btn = document.querySelector(".btn-copy");
-    btn.textContent = "Copied!";
-    btn.classList.add("copied");
+    var btn = document.querySelector('.btn-copy');
+    btn.textContent = 'Copied!';
+    btn.classList.add('copied');
     setTimeout(function() {
-      btn.textContent = "📋";
-      btn.classList.remove("copied");
+      btn.textContent = '📋';
+      btn.classList.remove('copied');
     }, 2000);
   } catch (e) {
-    alert("Copy failed");
+    // Fallback
+    var ta = document.createElement('textarea');
+    ta.value = sql;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
   }
 }

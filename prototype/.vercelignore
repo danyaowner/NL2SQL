@@ -1,0 +1,13 @@
+*.py
+*.pyc
+*.db
+*.sh
+*.bat
+*.md
+__pycache__/
+venv/
+venv_new/
+.env/
+requirements.txt
+uploads/
+templates/
