@@ -2,14 +2,29 @@
 """
 test_comprehensive.py — Comprehensive NL2SQL testing via Gemini pipeline (core.pipeline).
 Requires GEMINI_API_KEY in environment or .env file.
+Respects Gemini free tier rate limit (~15 RPM) with 4s delay between requests.
 """
 import sys, os, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core.pipeline import process_nl_query
 
+# Load .env without dotenv dependency
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            if _line.startswith("GEMINI_API_KEY="):
+                os.environ["GEMINI_API_KEY"] = _line.split("=", 1)[1].strip()
+                break
+
 db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_company.db")
 has_db = os.path.exists(db_path)
+
+# Rate limiting: Gemini free tier = 15 RPM, so 4s between requests
+DELAY_SECONDS = 4
+MAX_RETRIES = 1
+RETRY_DELAY = 8
 
 test_queries = [
     # === Простые SELECT ===
@@ -293,31 +308,49 @@ print(f"Mode: Gemini LLM (no keyword matching)")
 print("=" * 70)
 
 for q, category in test_queries:
-    try:
-        result = process_nl_query(q, db_path)
-        sql = result.get("formatted_sql") or result.get("sql", "")
-        
-        if not sql:
-            print(f"  NO SQL: {result.get('error', 'unknown')}")
+    # Rate limiting: respect Gemini free tier (skip first request)
+    if results["pass"] + results["fail"] > 0:
+        time.sleep(DELAY_SECONDS)
+    
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            result = process_nl_query(q, db_path)
+            sql = result.get("formatted_sql") or result.get("sql", "")
+            
+            if not sql:
+                print(f"  NO SQL: {result.get('error', 'unknown')[:80]}")
+                results["fail"] += 1
+                results["categories"].setdefault(category, {"pass": 0, "fail": 0})["fail"] += 1
+                break
+
+            if result.get("success"):
+                rows = result.get("rows") or []
+                print(f"  OK ({len(rows)} rows)")
+                results["pass"] += 1
+                results["categories"].setdefault(category, {"pass": 0, "fail": 0})["pass"] += 1
+                break
+            else:
+                error_msg = result.get("error", "Unknown error")
+                # Check for rate limiting
+                if "429" in str(error_msg) or "quota" in str(error_msg).lower() or "rate" in str(error_msg).lower():
+                    if attempt < MAX_RETRIES:
+                        print(f"  RATE LIMITED, retry in {RETRY_DELAY}s (attempt {attempt+1}/{MAX_RETRIES+1})...")
+                        time.sleep(RETRY_DELAY)
+                        continue
+                print(f"  ERROR: {error_msg[:80]}")
+                results["fail"] += 1
+                results["categories"].setdefault(category, {"pass": 0, "fail": 0})["fail"] += 1
+                break
+
+        except Exception as e:
+            if "429" in str(e) and attempt < MAX_RETRIES:
+                print(f"  RATE LIMITED, retry in {RETRY_DELAY}s...")
+                time.sleep(RETRY_DELAY)
+                continue
+            print(f"  EXCEPTION: {e}")
             results["fail"] += 1
             results["categories"].setdefault(category, {"pass": 0, "fail": 0})["fail"] += 1
-            continue
-
-        if result.get("success"):
-            rows = result.get("rows") or []
-            print(f"  OK ({len(rows)} rows)")
-            results["pass"] += 1
-            results["categories"].setdefault(category, {"pass": 0, "fail": 0})["pass"] += 1
-        else:
-            error_msg = result.get("error", "Unknown error")
-            print(f"  ERROR: {error_msg[:80]}")
-            results["fail"] += 1
-            results["categories"].setdefault(category, {"pass": 0, "fail": 0})["fail"] += 1
-
-    except Exception as e:
-        print(f"  EXCEPTION: {e}")
-        results["fail"] += 1
-        results["categories"].setdefault(category, {"pass": 0, "fail": 0})["fail"] += 1
+            break
 
 # Summary
 print("\n" + "=" * 70)
