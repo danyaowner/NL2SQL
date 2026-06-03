@@ -81,6 +81,17 @@
       <div class="quick-tags" id="quickTags"></div>
     </section>
 
+    <!-- History Panel -->
+    <section class="card history-card" id="historyCard">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h2>📜 История запросов</h2>
+        <button class="btn-clear-history" onclick="clearHistory()" title="Очистить историю">🗑️</button>
+      </div>
+      <div class="history-panel" id="historyPanel">
+        <div class="history-empty">История пуста</div>
+      </div>
+    </section>
+
     <section id="resultsSection" class="results-section" style="display:none">
       <!-- Pipeline steps -->
       <div class="pipeline" id="pipeline"></div>

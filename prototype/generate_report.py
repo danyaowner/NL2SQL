@@ -9,59 +9,26 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from nl_module import process_query
-from schema_selector import select_schema, SCHEMA
-from validator import validate
-from sql_generator import generate as gen_sql
+from core.pipeline import process_nl_query
+from core.schema_manager import introspect_schema, get_schema_summary
 import sqlite3
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_company.db")
 
 
-def run_sql(sql):
-    if not os.path.exists(DB_PATH):
-        return None, "БД не найдена"
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute(sql)
-        rows = [dict(r) for r in cur.fetchall()]
-        conn.close()
-        return rows, None
-    except Exception as e:
-        return None, str(e)
-
-
 def process_query_full(query_text):
-    results = {"query": query_text, "sql": None, "rows": None, "error": None, "success": False}
-    try:
-        qi = process_query(query_text)
-        results["analysis"] = {
-            "Язык": "Русский" if qi["language"] == "ru" else "English",
-            "Тип запроса": qi["query_type"],
-            "Сущности": ", ".join(qi["entities"]) if qi["entities"] else "—",
-        }
-        si = select_schema(qi["cleaned"])
-        results["tables"] = si["tables"]
-        sql = gen_sql(qi, si, mode="demo")
-        results["sql"] = sql
-        if sql:
-            valid, msg = validate(sql, {})
-            if valid:
-                rows, err = run_sql(sql)
-                if rows is not None:
-                    results["rows"] = rows
-                    results["success"] = True
-                else:
-                    results["error"] = err
-            else:
-                results["error"] = msg
-        else:
-            results["error"] = "Не удалось сгенерировать SQL"
-    except Exception as e:
-        results["error"] = str(e)
-    return results
+    """Process NL query through Gemini pipeline - NO keyword matching."""
+    if not os.path.exists(DB_PATH):
+        return {"query": query_text, "sql": None, "rows": None, "error": "DB not found", "success": False}
+    result = process_nl_query(query_text, DB_PATH)
+    # Convert to old format for backward compatibility
+    return {
+        "query": query_text,
+        "sql": result.get("formatted_sql") or result.get("sql"),
+        "rows": result.get("rows"),
+        "error": result.get("error"),
+        "success": result.get("success", False),
+    }
 
 
 def rows_to_html_table(rows):
@@ -106,12 +73,11 @@ def main():
         if r.get("rows") is not None:
             print(f"  Rows: {len(r['rows'])}")
 
+    # Schema via introspection
     schema_info = {}
-    for t_name, t_info in SCHEMA.items():
-        schema_info[t_name] = {
-            "description": t_info["description"],
-            "columns": list(t_info["columns"].items())[:8]
-        }
+    if os.path.exists(DB_PATH):
+        schema = introspect_schema(DB_PATH)
+        schema_info = get_schema_summary(schema)
 
     # Build HTML
     html = '<!DOCTYPE html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>NL2SQL Отчёт</title><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><style>'

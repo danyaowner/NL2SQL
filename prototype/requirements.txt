@@ -1,14 +1,13 @@
 # NL2SQL — Neural NL→SQL Converter
-# Зависимости для курсовой работы
+# Все преобразование NL→SQL идёт только через Gemini (без keyword matching)
 
 # Веб-фреймворк
 fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.9
 
-# LLM: Google Gemini (новый SDK предпочтителен, legacy — запасной)
+# LLM: Google Gemini
 google-genai>=1.0.0
-# google-generativeai>=0.8.0  # legacy, если google-genai не работает
 
 # Работа с SQL
 sqlparse>=0.5.0

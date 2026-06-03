@@ -361,11 +361,17 @@ function renderResults(result) {
     document.getElementById('sqlCode').textContent = result.sql;
   }
 
+  // Add to history
+  addToHistory(result.query || document.getElementById('queryInput').value.trim(), result);
+
   // Show results table
   if (result.rows && result.rows.length > 0) {
     var tc = document.getElementById('tableCard');
     tc.style.display = '';
-    document.getElementById('rowBadge').textContent = result.rows.length + ' rows';
+    var badge = document.getElementById('rowBadge');
+    badge.innerHTML = result.rows.length + ' rows' +
+      ' <button class="btn-export" onclick="exportCSV()" title="Export CSV">📥 CSV</button>' +
+      ' <button class="btn-export" onclick="exportJSON()" title="Export JSON">📦 JSON</button>';
 
     var cols = result.columns || Object.keys(result.rows[0]);
     var th = '<tr>';
@@ -386,7 +392,7 @@ function renderResults(result) {
     tc.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } else if (result.success) {
     document.getElementById('tableCard').style.display = '';
-    document.getElementById('rowBadge').textContent = '0 rows';
+    document.getElementById('rowBadge').innerHTML = '0 rows';
     document.getElementById('tableHead').innerHTML = '';
     document.getElementById('tableBody').innerHTML = '<tr><td colspan="100" style="text-align:center;padding:40px;color:var(--text2)">No data returned</td></tr>';
   }
@@ -399,10 +405,101 @@ function showError(msg) {
   card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-async function copySQL() {
+async var queryHistory = [];
+var MAX_HISTORY = 50;
+
+function addToHistory(query, result) {
+  queryHistory.unshift({
+    query: query,
+    sql: result.sql || result.formatted_sql || '',
+    rows: result.rows ? result.rows.length : 0,
+    success: result.success,
+    time: new Date().toLocaleTimeString(),
+  });
+  if (queryHistory.length > MAX_HISTORY) queryHistory.pop();
+  renderHistory();
+}
+
+function renderHistory() {
+  var panel = document.getElementById('historyPanel');
+  if (!panel) return;
+  if (queryHistory.length === 0) {
+    panel.innerHTML = '<div class="history-empty">No queries yet</div>';
+    return;
+  }
+  panel.innerHTML = queryHistory.map(function(h, i) {
+    var cls = h.success ? 'history-ok' : 'history-err';
+    return '<div class="history-item ' + cls + '" onclick="replayQuery(' + i + ')" title="' + (h.sql || '') + '">' +
+      '<div class="history-query">' + h.query + '</div>' +
+      '<div class="history-meta">' +
+      '<span>' + (h.success ? '✓ ' + h.rows + ' rows' : '✗ error') + '</span>' +
+      '<span>' + h.time + '</span>' +
+      '</div></div>';
+  }).join('');
+}
+
+function replayQuery(index) {
+  var item = queryHistory[index];
+  if (!item) return;
+  document.getElementById('queryInput').value = item.query;
+  submitQuery();
+}
+
+function clearHistory() {
+  queryHistory = [];
+  renderHistory();
+}
+
+function exportCSV() {
+  var table = document.getElementById('resultTable');
+  if (!table || !table.rows.length) return;
+  var csv = [];
+  for (var r = 0; r < table.rows.length; r++) {
+    var row = [];
+    var cells = r === 0 ? table.rows[r].querySelectorAll('th') : table.rows[r].querySelectorAll('td');
+    for (var c = 0; c < cells.length; c++) {
+      var val = cells[c].textContent.replace(/"/g, '""');
+      row.push('"' + val + '"');
+    }
+    csv.push(row.join(','));
+  }
+  var blob = new Blob(['\uFEFF' + csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  var link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'nl2sql_export.csv';
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function exportJSON() {
+  var table = document.getElementById('resultTable');
+  if (!table || !table.rows.length) return;
+  var headers = [];
+  var data = [];
+  var headerCells = table.rows[0].querySelectorAll('th');
+  for (var c = 0; c < headerCells.length; c++) {
+    headers.push(headerCells[c].textContent);
+  }
+  for (var r = 1; r < table.rows.length; r++) {
+    var row = {};
+    var cells = table.rows[r].querySelectorAll('td');
+    for (var c = 0; c < cells.length; c++) {
+      row[headers[c]] = cells[c].textContent;
+    }
+    data.push(row);
+  }
+  var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  var link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'nl2sql_export.json';
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function copySQL() {
   var sql = document.getElementById('sqlCode').textContent;
   try {
-    await navigator.clipboard.writeText(sql);
+    navigator.clipboard.writeText(sql);
     var btn = document.querySelector('.btn-copy');
     btn.textContent = 'Copied!';
     btn.classList.add('copied');

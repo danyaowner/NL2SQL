@@ -1,14 +1,15 @@
+#!/usr/bin/env python3
+"""
+test_proto.py — End-to-end тесты через Gemini-пайплайн (core.pipeline).
+Требует GEMINI_API_KEY в окружении или .env файле.
+"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from nl_module import process_query
-from schema_selector import select_schema
-from validator import validate
-from sql_generator import generate as gen_sql
-import sqlite3
+from core.pipeline import process_nl_query
 
 print("="*60)
-print("NL2SQL PROTOTYPE - END-TO-END TEST")
+print("NL2SQL PROTOTYPE - END-TO-END TEST (Gemini pipeline)")
 print("="*60)
 
 test_queries = [
@@ -22,7 +23,9 @@ test_queries = [
 ]
 
 db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_company.db")
-has_db = os.path.exists(db_path)
+if not os.path.exists(db_path):
+    print("ERROR: test_company.db not found! Run: python3 init_db.py --clean")
+    sys.exit(1)
 
 passed = 0
 failed = 0
@@ -33,42 +36,19 @@ for i, q in enumerate(test_queries, 1):
     print("-"*60)
     
     try:
-        # Step 1: NL processing
-        qi = process_query(q)
-        print(f"[1/3] NL: lang={qi['language']} type={qi['query_type']}")
-        print(f"      entities={qi['entities']}")
+        result = process_nl_query(q, db_path)
         
-        # Step 2: Schema selection
-        si = select_schema(qi["cleaned"])
-        print(f"[2/3] Schema: tables={si['tables']}")
-        
-        # Step 3: SQL generation
-        sql = gen_sql(qi, si, mode="demo")
-        print(f"[3/3] SQL:")
-        print(f"      {sql.replace(chr(10), chr(10)+'      ')}")
-        
-        # Validate
-        valid, msg = validate(sql, {})
-        if valid:
-            print(f"      VALIDATION: PASSED")
+        if result["success"]:
+            sql = result.get("formatted_sql") or result.get("sql") or ""
+            rows = result.get("rows") or []
+            print(f"  SQL: {sql[:90].replace(chr(10), ' ')}...")
+            print(f"  RESULT: {len(rows)} rows")
+            if rows:
+                print(f"  First row: {list(rows[0].values())[:3]}")
+            passed += 1
         else:
-            print(f"      VALIDATION: {msg}")
-        
-        # Execute
-        if has_db:
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            try:
-                cur.execute(sql)
-                rows = cur.fetchall()
-                print(f"      RESULT: {len(rows)} rows")
-                if rows:
-                    print(f"      First row: {rows[0]}")
-            except Exception as e:
-                print(f"      ERROR: {e}")
-            conn.close()
-        
-        passed += 1
+            print(f"  ERROR: {result.get('error', 'Unknown error')}")
+            failed += 1
     except Exception as e:
         print(f"FAILED: {e}")
         import traceback
@@ -76,5 +56,5 @@ for i, q in enumerate(test_queries, 1):
         failed += 1
 
 print(f"\n{'='*60}")
-print(f"RESULTS: {passed} passed, {failed} failed")
+print(f"RESULTS: {passed} passed, {failed} failed out of {len(test_queries)}")
 print(f"{'='*60}")

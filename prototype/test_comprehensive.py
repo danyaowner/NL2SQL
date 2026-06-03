@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 """
-test_comprehensive.py -- Комплексное тестирование NL2SQL прототипа
-Прогоняет все запросы пользователя, выявляет и логирует ошибки
+test_comprehensive.py — Comprehensive NL2SQL testing via Gemini pipeline (core.pipeline).
+Requires GEMINI_API_KEY in environment or .env file.
 """
-import sys, os, traceback
+import sys, os, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from nl_module import process_query
-from schema_selector import select_schema
-from validator import validate
-from sql_generator import generate as gen_sql
-import sqlite3
-import re as _re
+from core.pipeline import process_nl_query
 
 db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_company.db")
 has_db = os.path.exists(db_path)
@@ -194,6 +189,38 @@ test_queries = [
     ("Найди телефон сотрудника Иванова.", "negative"),
     ("Выведи прибыль компании.", "negative"),
     ("Покажи список поставщиков.", "negative"),
+
+    # === Edge-case: сложные условия ===
+    ("Покажи активные проекты с бюджетом от 100000 до 500000.", "complex"),
+    ("Найди сотрудников с зарплатой между 80000 и 150000 в отделе разработки.", "complex"),
+    ("Покажи просроченные задачи высокого приоритета.", "complex"),
+    ("Найди проекты, завершённые в 2024 году с бюджетом больше 200000.", "complex"),
+    ("Покажи внутренние комментарии к задачам проекта CRM.", "complex"),
+
+    # === Edge-case: HAVING ===
+    ("Покажи отделы, где средняя зарплата выше 100000.", "complex"),
+    ("Покажи проекты, в которых больше 3 задач.", "complex"),
+    ("Какие сотрудники имеют больше 2 комментариев?", "complex"),
+
+    # === Edge-case: множественные JOIN ===
+    ("Покажи задачи с проектами и исполнителями.", "multi_join"),
+    ("Выведи все комментарии к задачам проекта ERP с именами авторов.", "multi_join"),
+    ("Покажи сотрудников, их задачи и проекты, над которыми они работают.", "multi_join"),
+
+    # === Edge-case: NULL handling ===
+    ("Найди проекты без даты окончания.", "complex"),
+    ("Покажи сотрудников, у которых не указан руководитель.", "null_filter"),
+    ("Найди задачи без описания.", "complex"),
+
+    # === Edge-case: агрегация с условиями ===
+    ("Средняя зарплата активных сотрудников.", "complex"),
+    ("Общий бюджет активных проектов.", "aggregate"),
+    ("Максимальная зарплата в отделе маркетинга.", "complex"),
+
+    # === Edge-case: точные формулировки ===
+    ("Покажи ID, имя и зарплату всех сотрудников.", "employees"),
+    ("Найди проекты со статусом active и бюджетом больше средней зарплаты.", "complex"),
+    ("Какие задачи находятся в работе у команды разработки?", "natural"),
 ]
 
 results = {
@@ -258,53 +285,34 @@ def get_category_label(cat):
     return labels.get(cat, cat)
 
 print("=" * 70)
-print("NL2SQL PROTOTYPE - ПОЛНОЕ ТЕСТИРОВАНИЕ")
+print("NL2SQL PROTOTYPE - FULL TESTING (Gemini pipeline)")
 print("=" * 70)
-print(f"Всего запросов: {len(test_queries)}")
-print(f"База данных: {'Есть' if has_db else 'НЕТ!'}")
+print(f"Total queries: {len(test_queries)}")
+print(f"Database: {'Yes' if has_db else 'NO!'}")
+print(f"Mode: Gemini LLM (no keyword matching)")
 print("=" * 70)
 
 for q, category in test_queries:
     try:
-        # Step 1: NL processing
-        qi = process_query(q)
-
-        # Step 2: Schema selection
-        si = select_schema(qi["cleaned"])
-
-        # Step 3: SQL generation
-        sql = gen_sql(qi, si, mode="demo")
+        result = process_nl_query(q, db_path)
+        sql = result.get("formatted_sql") or result.get("sql", "")
+        
         if not sql:
-            raise ValueError("SQL generation returned None")
-
-        # Step 4: Validate
-        valid, msg = validate(sql, {})
-        if not valid:
-            print(f"  VALIDATION ERROR: {msg}")
+            print(f"  NO SQL: {result.get('error', 'unknown')}")
             results["fail"] += 1
             results["categories"].setdefault(category, {"pass": 0, "fail": 0})["fail"] += 1
             continue
 
-        # Step 5: Execute against DB
-        if has_db:
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            try:
-                cur.execute(sql)
-                rows = cur.fetchall()
-                conn.close()
-                print(f"  OK ({len(rows)} rows)")
-                results["pass"] += 1
-                results["categories"].setdefault(category, {"pass": 0, "fail": 0})["pass"] += 1
-            except sqlite3.Error as e:
-                print(f"  DB ERROR: {e}")
-                print(f"  SQL: {sql}")
-                results["fail"] += 1
-                results["categories"].setdefault(category, {"pass": 0, "fail": 0})["fail"] += 1
-                conn.close()
-        else:
+        if result.get("success"):
+            rows = result.get("rows") or []
+            print(f"  OK ({len(rows)} rows)")
             results["pass"] += 1
             results["categories"].setdefault(category, {"pass": 0, "fail": 0})["pass"] += 1
+        else:
+            error_msg = result.get("error", "Unknown error")
+            print(f"  ERROR: {error_msg[:80]}")
+            results["fail"] += 1
+            results["categories"].setdefault(category, {"pass": 0, "fail": 0})["fail"] += 1
 
     except Exception as e:
         print(f"  EXCEPTION: {e}")

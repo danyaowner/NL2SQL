@@ -16,10 +16,8 @@ from email.parser import BytesParser
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from nl_module import process_query
-from schema_selector import select_schema, SCHEMA
-from validator import validate
-from sql_generator import generate as gen_sql
+from core.pipeline import process_nl_query
+from core.schema_manager import introspect_schema, get_schema_summary
 import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -38,146 +36,19 @@ def _init_default_database():
 
 
 def get_schema_info():
-    result = {}
-    for t_name, t_info in SCHEMA.items():
-        result[t_name] = {
-            "description": t_info["description"],
-            "columns": {k: v for k, v in t_info["columns"].items()}
-        }
-    return result
+    """Get schema from the currently active database via introspection."""
+    if current_db and os.path.exists(current_db):
+        schema = introspect_schema(current_db)
+        return get_schema_summary(schema)
+    return {}
 
-
-def run_sql(sql, db_path=None):
-    if db_path is None:
-        db_path = current_db
-    if db_path is None or not os.path.exists(db_path):
-        return None, "База данных не найдена"
-    try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute(sql)
-        rows = [dict(r) for r in cur.fetchall()]
-        conn.close()
-        return rows, None
-    except Exception as e:
-        return None, str(e)
 
 
 def process_query_full(query_text):
-    results = {
-        "query": query_text,
-        "steps": [],
-        "sql": None,
-        "rows": None,
-        "error": None,
-        "success": False,
-    }
-
-    # Step 1: NL Processing
-    try:
-        qi = process_query(query_text)
-        results["steps"].append({
-            "name": "Анализ запроса",
-            "icon": "🔍",
-            "status": "success",
-            "details": {
-                "Язык": "Русский" if qi["language"] == "ru" else "English",
-                "Тип запроса": qi["query_type"],
-                "Сущности": ", ".join(qi["entities"]) if qi["entities"] else "—",
-                "Числа": str(qi["numbers"]) if qi["numbers"] else "—",
-                "Условия": str(qi["conditions"]) if qi["conditions"] else "—",
-            },
-            "raw": qi,
-        })
-    except Exception as e:
-        results["steps"].append({"name": "Анализ запроса", "icon": "🔍", "status": "error", "error": str(e)})
-        results["error"] = str(e)
-        return results
-
-    # Step 2: Schema Selection
-    try:
-        si = select_schema(qi["cleaned"])
-        tables_info = []
-        for t in si["tables"]:
-            cols = si["columns"].get(t, [])
-            tables_info.append({
-                "name": t,
-                "description": SCHEMA[t]["description"],
-                "columns": cols[:6],
-            })
-        results["steps"].append({
-            "name": "Выбор схемы",
-            "icon": "📚",
-            "status": "success",
-            "details": {"Таблицы": ", ".join(si["tables"])},
-            "tables": tables_info,
-        })
-    except Exception as e:
-        results["steps"].append({"name": "Выбор схемы", "icon": "📚", "status": "error", "error": str(e)})
-        results["error"] = str(e)
-        return results
-
-    # Step 3: SQL Generation
-    try:
-        sql = gen_sql(qi, si, mode="demo")
-        results["sql"] = sql
-        results["steps"].append({
-            "name": "Генерация SQL",
-            "icon": "💡",
-            "status": "success" if sql else "error",
-            "sql": sql,
-            "error": None if sql else "Не удалось сгенерировать SQL",
-        })
-    except Exception as e:
-        results["steps"].append({"name": "Генерация SQL", "icon": "💡", "status": "error", "error": str(e)})
-        results["error"] = str(e)
-        return results
-
-    if not sql:
-        results["error"] = "Не удалось сгенерировать SQL"
-        return results
-
-    # Step 4: Validation
-    try:
-        db_schema = {}
-        valid, msg = validate(sql, db_schema)
-        results["steps"].append({
-            "name": "Валидация",
-            "icon": "✅",
-            "status": "success" if valid else "warning",
-            "valid": valid,
-            "message": msg if not valid else "SQL корректен и безопасен",
-        })
-    except Exception as e:
-        results["steps"].append({"name": "Валидация", "icon": "✅", "status": "error", "error": str(e)})
-        results["error"] = str(e)
-        return results
-
-    if not valid:
-        results["error"] = msg
-        return results
-
-    # Step 5: Execution
-    try:
-        rows, err = run_sql(sql)
-        results["rows"] = rows
-        results["steps"].append({
-            "name": "Выполнение",
-            "icon": "🚀",
-            "status": "success" if rows is not None else "error",
-            "row_count": len(rows) if rows else 0,
-            "error": err,
-            "columns": list(rows[0].keys()) if rows else [],
-        })
-        if rows is not None:
-            results["success"] = True
-    except Exception as e:
-        results["steps"].append({"name": "Выполнение", "icon": "🚀", "status": "error", "error": str(e)})
-        results["error"] = str(e)
-        return results
-
-    return results
+    """Process NL query through Gemini pipeline - NO keyword matching."""
+    if current_db is None or not os.path.exists(current_db):
+        return {"query": query_text, "steps": [], "sql": None, "rows": None, "error": "No database loaded", "success": False}
+    return process_nl_query(query_text, current_db)
 
 
 class APIHandler(http.server.SimpleHTTPRequestHandler):
