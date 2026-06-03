@@ -105,13 +105,22 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     """При старте: авто-создание demo БД, если её нет."""
+    print("[STARTUP] NL2SQL server starting...", flush=True)
+    print(f"[STARTUP] Python: {sys.version}", flush=True)
+    print(f"[STARTUP] PORT env: {os.environ.get('PORT', 'not set')}", flush=True)
     demo_path = str(DEFAULT_DB)
+    print(f"[STARTUP] Demo DB path: {demo_path}", flush=True)
     if not os.path.exists(demo_path):
         try:
             _init_demo_database()
-            print(f"[OK] Demo database created: {demo_path}")
+            print(f"[STARTUP] Demo database created: {demo_path}", flush=True)
         except Exception as e:
-            print(f"[WARN] Could not create demo database: {e}")
+            print(f"[STARTUP] Could not create demo database: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"[STARTUP] Demo DB already exists", flush=True)
+    print("[STARTUP] Ready to accept connections", flush=True)
 
 
 def _get_db_path() -> str:
