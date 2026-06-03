@@ -353,18 +353,13 @@ function renderResults(result) {
   pipeline.innerHTML = html;
 
   // Show SQL with syntax highlighting
-  if (result.formatted_sql) {
+  var sql = result.formatted_sql || result.sql;
+  if (sql) {
     document.getElementById('sqlCard').style.display = '';
     var codeEl = document.getElementById('sqlCode');
-    codeEl.textContent = result.formatted_sql;
+    codeEl.textContent = sql;
     codeEl.className = 'language-sql';
     if (typeof hljs !== 'undefined') hljs.highlightElement(codeEl);
-  } else if (result.sql) {
-    document.getElementById('sqlCard').style.display = '';
-    var codeEl2 = document.getElementById('sqlCode');
-    codeEl2.textContent = result.sql;
-    codeEl2.className = 'language-sql';
-    if (typeof hljs !== 'undefined') hljs.highlightElement(codeEl2);
   }
 
   // Add to history
