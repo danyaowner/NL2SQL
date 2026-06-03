@@ -131,12 +131,12 @@ body {
 .main {
   position: relative;
   z-index: 1;
-  padding: 32px 24px;
 }
 
 .container {
   max-width: 1100px;
   margin: 0 auto;
+  padding: 32px 24px 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -846,6 +846,71 @@ body {
   border-color: var(--red);
   color: var(--red);
   background: rgba(239,68,68,0.08);
+}
+
+/* Database switch actions on upload screen */
+.upload-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.btn-demo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: rgba(59,130,246,0.08);
+  color: var(--accent2);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-demo:hover {
+  background: rgba(59,130,246,0.16);
+  border-color: var(--accent2);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(59,130,246,0.2);
+}
+
+.btn-demo:active {
+  transform: translateY(0);
+}
+
+.btn-demo:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-demo-icon {
+  font-size: 18px;
+}
+
+.btn-cancel-switch {
+  padding: 10px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 13px;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-cancel-switch:hover {
+  border-color: var(--text2);
+  color: var(--text);
+  background: rgba(255,255,255,0.03);
 }
 
 /* Export buttons */

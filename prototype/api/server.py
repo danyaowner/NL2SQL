@@ -31,6 +31,7 @@ from pydantic import BaseModel
 
 from core.pipeline import process_nl_query
 from core.schema_manager import introspect_schema, get_schema_summary
+from init_db import init_database as init_demo_database
 
 
 # === Модели данных ===
@@ -94,6 +95,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """При старте: авто-создание demo БД, если её нет."""
+    demo_path = str(DEFAULT_DB)
+    if not os.path.exists(demo_path):
+        try:
+            init_demo_database()
+            print(f"[OK] Demo database created: {demo_path}")
+        except Exception as e:
+            print(f"[WARN] Could not create demo database: {e}")
 
 
 def _get_db_path() -> str:
@@ -170,6 +183,35 @@ async def upload_database(file: UploadFile = File(...)):
         success=True,
         name=save_path.name,
         original_name=file.filename,
+    )
+
+
+@app.post("/api/init-demo-db", response_model=UploadResponse)
+async def init_demo_db():
+    """Инициализация встроенной демо-БД (одним кликом)."""
+    global _current_db
+    demo_path = str(DEFAULT_DB)
+
+    if not os.path.exists(demo_path):
+        try:
+            init_demo_database()
+        except Exception as e:
+            return UploadResponse(
+                success=False,
+                error=f"Не удалось создать демо-БД: {e}"
+            )
+
+    if not os.path.exists(demo_path):
+        return UploadResponse(
+            success=False,
+            error="Не удалось создать демо-БД"
+        )
+
+    _current_db = demo_path
+    return UploadResponse(
+        success=True,
+        name=DEFAULT_DB.name,
+        original_name="demo (тестовая компания)",
     )
 
 

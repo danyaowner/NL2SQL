@@ -21,6 +21,16 @@
     <p class="upload-subtitle">Neural NL → SQL через Gemini</p>
     <p class="upload-desc">Загрузите <strong>.db</strong> файл с вашей базой данных,<br>чтобы задавать вопросы на естественном языке</p>
 
+    <div class="upload-actions">
+      <button class="btn-demo" onclick="initDemoDB()" id="btnDemo">
+        <span class="btn-demo-icon">🚀</span>
+        <span>Попробовать демо</span>
+      </button>
+      <button class="btn-cancel-switch" onclick="cancelSwitchDB()" id="btnCancelSwitch" style="display:none">
+        ← Вернуться к текущей базе
+      </button>
+    </div>
+
     <div class="db-drop-zone" id="dbDropZone">
       <div class="db-drop-icon">📁</div>
       <div class="db-drop-text">
@@ -60,6 +70,10 @@
       <div class="header-status">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">Checking...</span>
+        <button class="btn-db-switch" id="btnSwitchDB" onclick="switchDatabase()" title="Сменить базу данных">
+          <span class="db-header-name" id="dbHeaderName">DB</span>
+          <span class="db-switch-icon">↻</span>
+        </button>
       </div>
     </div>
   </header>

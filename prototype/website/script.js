@@ -63,6 +63,14 @@ const API = {
 
       xhr.send(formData);
     });
+  },
+  async initDemoDB() {
+    const res = await fetch(API._url('init-demo-db'), { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(function() { return {}; });
+      throw new Error(err.error || ('HTTP ' + res.status));
+    }
+    return res.json();
   }
 };
 
@@ -98,6 +106,8 @@ window.addEventListener('DOMContentLoaded', function() {
 });
 
 // ─── Upload Screen ───────────────────────────────────────────────────
+
+var uploadMode = 'initial'; // 'initial' | 'switch'
 
 function initUpload() {
   var dropZone = document.getElementById('dbDropZone');
@@ -168,7 +178,16 @@ async function startUpload(file) {
       progressText.textContent = '✅ ' + result.name + ' loaded!';
 
       setTimeout(function() {
-        onDatabaseLoaded(result.name);
+        var isSwitch = uploadMode === 'switch';
+        onDatabaseLoaded(result.name, isSwitch);
+        if (isSwitch) {
+          // Сброс кнопок загрузочного экрана
+          var btnCancel = document.getElementById('btnCancelSwitch');
+          var btnDemo = document.getElementById('btnDemo');
+          if (btnCancel) btnCancel.style.display = 'none';
+          if (btnDemo) btnDemo.style.display = '';
+          uploadMode = 'initial';
+        }
       }, 600);
     } else {
       showUploadError(result.error || 'Upload error');
@@ -189,15 +208,28 @@ function showUploadError(msg) {
   errorEl.textContent = '❌ ' + msg;
 }
 
-function onDatabaseLoaded(name) {
+function onDatabaseLoaded(name, clearHistoryFlag) {
   document.getElementById('uploadScreen').style.display = 'none';
   document.getElementById('mainContent').style.display = '';
 
   var statusText = document.getElementById('statusText');
   if (statusText) statusText.textContent = 'DB: ' + name;
 
+  var dbHeaderName = document.getElementById('dbHeaderName');
+  if (dbHeaderName) dbHeaderName.textContent = name;
+
   var schemaDesc = document.getElementById('schemaDesc');
   if (schemaDesc) schemaDesc.textContent = 'Auto-detected from: ' + name;
+
+  if (clearHistoryFlag) {
+    clearHistory();
+  }
+
+  // Hide results on DB switch
+  document.getElementById('resultsSection').style.display = 'none';
+  document.getElementById('sqlCard').style.display = 'none';
+  document.getElementById('tableCard').style.display = 'none';
+  document.getElementById('errorCard').style.display = 'none';
 
   loadSchema();
 }
@@ -516,5 +548,72 @@ function copySQL() {
     ta.select();
     document.execCommand('copy');
     document.body.removeChild(ta);
+  }
+}
+
+// ─── Database Switching ──────────────────────────────────────────────
+
+function switchDatabase() {
+  uploadMode = 'switch';
+
+  // Показать кнопку отмены, скрыть демо
+  var btnCancel = document.getElementById('btnCancelSwitch');
+  var btnDemo = document.getElementById('btnDemo');
+  if (btnCancel) btnCancel.style.display = '';
+  if (btnDemo) btnDemo.style.display = 'none';
+
+  // Сбросить состояние загрузки
+  document.getElementById('dbDropZone').style.display = '';
+  document.getElementById('dbUploadStatus').style.display = 'none';
+  document.getElementById('dbError').style.display = 'none';
+
+  // Показать экран загрузки
+  document.getElementById('mainContent').style.display = 'none';
+  document.getElementById('uploadScreen').style.display = '';
+}
+
+function cancelSwitchDB() {
+  uploadMode = 'initial';
+
+  // Скрыть экран загрузки, показать интерфейс
+  document.getElementById('uploadScreen').style.display = 'none';
+  document.getElementById('mainContent').style.display = '';
+
+  // Сбросить кнопки
+  var btnCancel = document.getElementById('btnCancelSwitch');
+  var btnDemo = document.getElementById('btnDemo');
+  if (btnCancel) btnCancel.style.display = 'none';
+  if (btnDemo) btnDemo.style.display = '';
+}
+
+async function initDemoDB() {
+  var btnDemo = document.getElementById('btnDemo');
+  var dropZone = document.getElementById('dbDropZone');
+  var uploadStatus = document.getElementById('dbUploadStatus');
+  var uploadText = document.getElementById('dbUploadText');
+  var errorEl = document.getElementById('dbError');
+
+  btnDemo.disabled = true;
+  btnDemo.innerHTML = '<span class="step-loader" style="width:14px;height:14px;border-width:2px;margin-right:6px"></span> Загрузка...';
+  errorEl.style.display = 'none';
+
+  try {
+    var result = await API.initDemoDB();
+    if (result.success) {
+      dropZone.style.display = 'none';
+      uploadStatus.style.display = 'block';
+      uploadText.textContent = '✅ ' + result.name + ' — демо-база загружена!';
+
+      setTimeout(function() {
+        onDatabaseLoaded('Демо-компания', true);
+      }, 800);
+    } else {
+      showUploadError(result.error || 'Demo init error');
+    }
+  } catch (e) {
+    showUploadError(e.message);
+  } finally {
+    btnDemo.disabled = false;
+    btnDemo.innerHTML = '<span class="btn-demo-icon">🚀</span><span>Попробовать демо</span>';
   }
 }
