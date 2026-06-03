@@ -31,7 +31,12 @@ from pydantic import BaseModel
 
 from core.pipeline import process_nl_query
 from core.schema_manager import introspect_schema, get_schema_summary
-from init_db import init_database as init_demo_database
+
+
+def _init_demo_database():
+    """Ленивый импорт init_db — не роняет сервер при ошибке."""
+    from init_db import init_database as _do_init
+    _do_init()
 
 
 # === Модели данных ===
@@ -103,7 +108,7 @@ async def startup_event():
     demo_path = str(DEFAULT_DB)
     if not os.path.exists(demo_path):
         try:
-            init_demo_database()
+            _init_demo_database()
             print(f"[OK] Demo database created: {demo_path}")
         except Exception as e:
             print(f"[WARN] Could not create demo database: {e}")
@@ -194,7 +199,7 @@ async def init_demo_db():
 
     if not os.path.exists(demo_path):
         try:
-            init_demo_database()
+            _init_demo_database()
         except Exception as e:
             return UploadResponse(
                 success=False,
