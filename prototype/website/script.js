@@ -352,13 +352,19 @@ function renderResults(result) {
 
   pipeline.innerHTML = html;
 
-  // Show SQL
+  // Show SQL with syntax highlighting
   if (result.formatted_sql) {
     document.getElementById('sqlCard').style.display = '';
-    document.getElementById('sqlCode').textContent = result.formatted_sql;
+    var codeEl = document.getElementById('sqlCode');
+    codeEl.textContent = result.formatted_sql;
+    codeEl.className = 'language-sql';
+    if (typeof hljs !== 'undefined') hljs.highlightElement(codeEl);
   } else if (result.sql) {
     document.getElementById('sqlCard').style.display = '';
-    document.getElementById('sqlCode').textContent = result.sql;
+    var codeEl2 = document.getElementById('sqlCode');
+    codeEl2.textContent = result.sql;
+    codeEl2.className = 'language-sql';
+    if (typeof hljs !== 'undefined') hljs.highlightElement(codeEl2);
   }
 
   // Add to history
@@ -405,7 +411,7 @@ function showError(msg) {
   card.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-async var queryHistory = [];
+var queryHistory = [];
 var MAX_HISTORY = 50;
 
 function addToHistory(query, result) {
