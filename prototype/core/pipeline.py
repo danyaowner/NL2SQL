@@ -1,25 +1,32 @@
 """
 pipeline.py — Оркестрация полного NL->SQL pipeline.
+Поддерживает SQLite (путь к файлу) и remote СУБД (DBConnectionInfo).
 """
 import time
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Union
 
 from .preprocessor import clean_query
 from .schema_manager import introspect_schema, format_schema_for_prompt, get_schema_summary
 from .prompt_builder import build_prompt
 from .llm_client import generate_sql
 from .sql_validator import validate, get_sql_info
-from .executor import execute_query
+from .executor import execute_query, execute_query_adapter
+from .db_adapter import DBConnectionInfo, create_db_adapter
 
 logger = logging.getLogger("pipeline")
 
 
 def process_nl_query(
     user_query: str,
-    db_path: str,
-    adapter: Optional[Any] = None,
+    db_source: Union[str, DBConnectionInfo],
 ) -> Dict[str, Any]:
+    """
+    Обработать NL запрос.
+    db_source может быть:
+    - str: путь к SQLite файлу
+    - DBConnectionInfo: параметры подключения к remote СУБД
+    """
     start_time = time.time()
     result = {
         "query": user_query,
@@ -33,6 +40,8 @@ def process_nl_query(
         "timing_ms": 0,
         "success": False,
     }
+
+    is_remote = isinstance(db_source, DBConnectionInfo)
 
     def add_step(name, status, detail, ms=0, **extra):
         step = {"name": name, "status": status, "detail": detail, "ms": ms}
@@ -52,12 +61,27 @@ def process_nl_query(
     # === Шаг 2: Schema ===
     t = time.time()
     try:
-        if adapter and adapter.is_connected:
+        if is_remote:
+            adapter = create_db_adapter(
+                db_type=db_source.db_type,
+                host=db_source.host,
+                port=db_source.port,
+                user=db_source.user,
+                password=db_source.password,
+                database=db_source.database,
+            )
+            ok, err = adapter.connect()
+            if not ok:
+                raise Exception(err or "Не удалось подключиться")
             schema = adapter.get_full_schema()
+            adapter.close()
+            # Конвертируем в формат, ожидаемый format_schema_for_prompt
+            schema_for_prompt = schema
         else:
-            schema = introspect_schema(db_path)
-        schema_text = format_schema_for_prompt(schema)
-        add_step("Schema", "success", f"Найдено таблиц: {len(schema)}", ms=int((time.time()-t)*1000), tables=list(schema.keys()))
+            schema = introspect_schema(db_source)
+            schema_for_prompt = schema
+        schema_text = format_schema_for_prompt(schema_for_prompt)
+        add_step("Schema", "success", f"Найдено таблиц: {len(schema_for_prompt)}", ms=int((time.time()-t)*1000), tables=list(schema_for_prompt.keys()))
     except Exception as e:
         result["error"] = f"Ошибка чтения схемы: {e}"
         add_step("Schema", "error", str(e), ms=int((time.time()-t)*1000))
@@ -65,8 +89,7 @@ def process_nl_query(
 
     # === Шаг 3: Prompt ===
     t = time.time()
-    dialect = adapter.dialect if adapter else "sqlite"
-    prompt = build_prompt(cleaned, schema_text, dialect=dialect)
+    prompt = build_prompt(cleaned, schema_text)
     add_step("Prompt", "success", f"Промпт ({len(prompt)} символов)", ms=int((time.time()-t)*1000))
 
     # === Шаг 4: LLM Generation ===
@@ -95,10 +118,10 @@ def process_nl_query(
 
     # === Шаг 6: Execution ===
     t = time.time()
-    if adapter and adapter.is_connected:
-        rows, exec_error = adapter.execute(sql)
+    if is_remote:
+        rows, exec_error = execute_query_adapter(db_source, sql)
     else:
-        rows, exec_error = execute_query(db_path, sql)
+        rows, exec_error = execute_query(db_source, sql)
     if exec_error:
         result["error"] = f"Ошибка выполнения: {exec_error}"
         add_step("Execution", "error", exec_error, ms=int((time.time()-t)*1000))

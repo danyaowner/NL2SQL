@@ -27,6 +27,12 @@
       </button>
     </div>
 
+    <!-- Upload Tabs -->
+    <div class="upload-tabs">
+      <button class="upload-tab active" onclick="switchUploadTab('file')" id="tabFile">📁 Файл .db</button>
+      <button class="upload-tab" onclick="switchUploadTab('connect')" id="tabConnect">🔌 Подключение к СУБД</button>
+    </div>
+
     <!-- File upload zone -->
     <div class="upload-panel" id="panelFile">
       <div class="db-drop-zone" id="dbDropZone">
@@ -39,7 +45,47 @@
       </div>
     </div>
 
-
+    <!-- Connection to DBMS form -->
+    <div class="upload-panel" id="panelConnect" style="display:none">
+      <div class="connect-form">
+        <div class="form-group">
+          <label class="form-label">Тип СУБД</label>
+          <select class="form-select" id="connectDbType">
+            <option value="postgresql">PostgreSQL</option>
+            <option value="mysql">MySQL / MariaDB</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Хост</label>
+            <input class="form-input" type="text" id="connectHost" placeholder="localhost" value="localhost">
+          </div>
+          <div class="form-group" style="flex:0 0 120px">
+            <label class="form-label">Порт</label>
+            <input class="form-input" type="number" id="connectPort" placeholder="5432">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Пользователь</label>
+            <input class="form-input" type="text" id="connectUser" placeholder="postgres">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label class="form-label">Пароль</label>
+            <input class="form-input" type="password" id="connectPassword" placeholder="••••••••">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Имя базы данных</label>
+          <input class="form-input" type="text" id="connectDatabase" placeholder="mydb">
+        </div>
+        <button class="btn-connect" id="btnConnect" onclick="connectToDB()">
+          <span>🔌</span>
+          <span>Подключиться</span>
+        </button>
+        <div class="db-connect-status" id="dbConnectStatus" style="display:none"></div>
+      </div>
+    </div>
 
     <div class="db-upload-status" id="dbUploadStatus" style="display:none">
       <div class="db-upload-progress-bar">

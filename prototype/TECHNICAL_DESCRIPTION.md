@@ -22,7 +22,7 @@
 
 ## 1.1. Концепция
 
-NL2SQL — это веб-приложение, которое принимает запрос на естественном языке (русском или английском) и преобразует его в SQL-запрос через Google Gemini LLM, затем выполняет его на подключённой базе данных и возвращает результат.
+NL2SQL — это веб-приложение, которое принимает запрос на естественном языке (русском или английском) и преобразует его в SQL-запрос через Google Gemini LLM, затем выполняет его на подключённой базе данных SQLite и возвращает результат.
 
 ## 1.2. Pipeline
 
@@ -32,13 +32,11 @@ NL2SQL — это веб-приложение, которое принимает
 
 Все преобразования идут исключительно через Gemini — никакого keyword matching или правил.
 
-## 1.3. Поддерживаемые СУБД
+## 1.3. Поддерживаемая СУБД
 
-| СУБД | Режим | Адаптер |
-|------|-------|---------|
-| SQLite | Файловый / через адаптер | `executor.py` / `db_adapter.py` |
-| PostgreSQL | Через адаптер | `db_adapter.py` |
-| MySQL | Через адаптер | `db_adapter.py` |
+| СУБД | Режим | Модуль |
+|------|-------|--------|
+| SQLite | Файловый (.db) | `executor.py` / `db_adapter.py` |
 
 ## 1.4. Ключевые принципы
 
@@ -46,7 +44,7 @@ NL2SQL — это веб-приложение, которое принимает
 |---------|----------|
 | LLM-only | Никаких правил — только Gemini генерирует SQL |
 | Безопасность | Только SELECT, блокировка DROP/DELETE/INSERT/UPDATE |
-| Динамическая схема | Интроспекция через PRAGMA (SQLite) или information_schema |
+| Динамическая схема | Интроспекция через PRAGMA SQLite |
 | Read-only | Все запросы выполняются в режиме только для чтения |
 | Модульность | Каждый модуль core/ изолирован и тестируется независимо |
 
@@ -65,7 +63,7 @@ prototype/
 │   ├── sql_validator.py    # Валидация и безопасность SQL
 │   ├── executor.py         # Выполнение SQL (SQLite, read-only)
 │   ├── preprocessor.py     # Очистка текста
-│   └── db_adapter.py       # Адаптер PostgreSQL/MySQL
+│   └── db_adapter.py       # Адаптер для SQLite
 ├── website/
 │   ├── index.html          # Главная страница (SPA)
 │   ├── styles.css          # Стили
@@ -95,14 +93,12 @@ prototype/
 | `GET` | `/api/schema` | Схема активной БД |
 | `GET` | `/api/health` | Проверка состояния |
 | `POST` | `/api/upload-database` | Загрузка `.db` файла |
-| `POST` | `/api/connect-db` | Подключение к PostgreSQL/MySQL |
 
 ## 3.2. Pydantic модели
 
 - `QueryRequest` — входящий запрос: `{query: str}`
 - `QueryResponse` — результат: SQL, строки, колонки, ошибки, timing
 - `SchemaResponse` — схема: таблицы, колонки, размеры
-- `ConnectRequest` — параметры подключения к СУБД
 - `HealthResponse` — статус системы
 
 ## 3.3. Особенности
@@ -143,8 +139,6 @@ clean_query("  Find   all   employees  ")  # → "Find all employees"
 3. **Few-shot примеры** — 7 пар (запрос → SQL) для повышения точности
 4. **Запрос пользователя**
 
-Учитывает диалект СУБД (SQLite/PostgreSQL/MySQL).
-
 ## 4.4. LLM Client (`llm_client.py`)
 
 Клиент для Google Gemini API:
@@ -176,18 +170,18 @@ clean_query("  Find   all   employees  ")  # → "Find all employees"
 
 ```
 1. Preprocessing  →  clean_query()
-2. Schema         →  introspect_schema() / adapter.get_full_schema()
+2. Schema         →  introspect_schema()
 3. Prompt         →  build_prompt()
 4. LLM            →  generate_sql()
 5. Validation     →  validate()
-6. Execution      →  execute_query() / adapter.execute()
+6. Execution      →  execute_query()
 ```
 
 Каждый шаг логирует статус, время и детали в `result["steps"]`.
 
 ## 4.8. DB Adapter (`db_adapter.py`)
 
-Универсальный адаптер для разных СУБД:
+Адаптер для SQLite:
 - `connect()` / `close()` / `is_connected`
 - `get_tables()` — список таблиц
 - `get_full_schema()` — полная схема
@@ -198,7 +192,7 @@ clean_query("  Find   all   employees  ")  # → "Find all employees"
 
 ## 5.1. Загрузка базы данных
 
-База данных загружается пользователем через веб-интерфейс (`.db` файл через `/api/upload-database`) или подключается к внешней СУБД (PostgreSQL/MySQL через `/api/connect-db`). Также можно указать путь к `.db` файлу через `--db` при запуске.
+База данных загружается пользователем через веб-интерфейс (`.db` файл через `/api/upload-database`). Также можно указать путь к `.db` файлу через `--db` при запуске.
 
 ## 5.2. Связи (пример)
 
@@ -324,7 +318,7 @@ python test_introspect.py     # интроспекция БД
 | Язык | Python 3.x |
 | Веб-фреймворк | FastAPI + uvicorn |
 | LLM | Google Gemini (`google-genai`) |
-| Базы данных | SQLite, PostgreSQL, MySQL |
+| База данных | SQLite |
 | SQL парсинг | `sqlparse` |
 | Валидация | Pydantic v2 |
 | Фронтенд | HTML5 + CSS + vanilla JS |

@@ -130,6 +130,69 @@ window.addEventListener('DOMContentLoaded', function() {
 
 var uploadMode = 'initial';
 
+function switchUploadTab(tab) {
+  document.getElementById('panelFile').style.display = tab === 'file' ? '' : 'none';
+  document.getElementById('panelConnect').style.display = tab === 'connect' ? '' : 'none';
+  document.getElementById('tabFile').className = 'upload-tab' + (tab === 'file' ? ' active' : '');
+  document.getElementById('tabConnect').className = 'upload-tab' + (tab === 'connect' ? ' active' : '');
+}
+
+function connectToDB() {
+  var btn = document.getElementById('btnConnect');
+  var statusEl = document.getElementById('dbConnectStatus');
+  var dbType = document.getElementById('connectDbType').value;
+  var host = document.getElementById('connectHost').value.trim();
+  var port = parseInt(document.getElementById('connectPort').value.trim(), 10) || 0;
+  var user = document.getElementById('connectUser').value.trim();
+  var password = document.getElementById('connectPassword').value;
+  var database = document.getElementById('connectDatabase').value.trim();
+  if (!host || !user || !database) {
+    statusEl.style.display = 'block';
+    statusEl.className = 'db-connect-status error';
+    statusEl.textContent = 'Заполните хост, пользователя и имя базы данных';
+    return;
+  }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="step-loader" style="width:18px;height:18px;border-width:2px"></span> Подключение...';
+  statusEl.style.display = 'none';
+  fetch(API._url('connect-database'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      db_type: dbType,
+      host: host,
+      port: port,
+      user: user,
+      password: password,
+      database: database,
+    }),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(result) {
+    if (result.success) {
+      statusEl.style.display = 'block';
+      statusEl.className = 'db-connect-status success';
+      statusEl.textContent = '✅ Подключено к ' + result.name;
+      setTimeout(function() {
+        onDatabaseLoaded(result.name, true);
+      }, 600);
+    } else {
+      statusEl.style.display = 'block';
+      statusEl.className = 'db-connect-status error';
+      statusEl.textContent = '❌ ' + (result.error || 'Ошибка подключения');
+    }
+  })
+  .catch(function(e) {
+    statusEl.style.display = 'block';
+    statusEl.className = 'db-connect-status error';
+    statusEl.textContent = '❌ ' + e.message;
+  })
+  .finally(function() {
+    btn.disabled = false;
+    btn.innerHTML = '<span>🔌</span><span>Подключиться</span>';
+  });
+}
+
 function initUpload() {
   var dropZone = document.getElementById('dbDropZone');
   var fileInput = document.getElementById('dbFileInput');

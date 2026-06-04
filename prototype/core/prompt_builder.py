@@ -4,15 +4,9 @@ prompt_builder.py — Сборка промпта для LLM.
 Цель: заставить LLM генерировать ТОЛЬКО валидный SELECT SQL.
 """
 
-def _system_instructions(dialect: str = "sqlite") -> str:
-    """Системные инструкции с учётом диалекта СУБД."""
-    dialect_hints = {
-        "sqlite": "для SQLite",
-        "postgresql": "для PostgreSQL (используй двойные кавычки для идентификаторов, ILIKE для регистронезависимого поиска, синтаксис PostgreSQL)",
-        "mysql": "для MySQL (используй обратные кавычки для идентификаторов, синтаксис MySQL)",
-    }
-    dialect_text = dialect_hints.get(dialect, f"для {dialect}")
-    return f"""Ты — SQL-эксперт. Твоя задача — преобразовать запрос на русском языке в корректный SQL-запрос {dialect_text}.
+def _system_instructions() -> str:
+    """Системные инструкции для SQLite."""
+    return """Ты — SQL-эксперт. Твоя задача — преобразовать запрос на русском языке в корректный SQL-запрос для SQLite.
 
 ПРАВИЛА:
 1. Генерируй ТОЛЬКО SELECT-запросы. Никаких INSERT/UPDATE/DELETE/DROP.
@@ -59,7 +53,6 @@ def build_prompt(
     user_query: str,
     schema_text: str,
     include_few_shot: bool = True,
-    dialect: str = "sqlite",
 ) -> str:
     """
     Собирает полный промпт для отправки в LLM.
@@ -73,7 +66,7 @@ def build_prompt(
     parts = []
 
     # 1. Системные инструкции
-    parts.append(_system_instructions(dialect))
+    parts.append(_system_instructions())
 
     # 2. Схема БД
     parts.append("\n--- СХЕМА БАЗЫ ДАННЫХ ---")

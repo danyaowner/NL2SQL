@@ -1,5 +1,6 @@
 """
 executor.py — Безопасное выполнение SQL-запросов (только SELECT).
+Поддерживает SQLite, PostgreSQL, MySQL.
 """
 import sqlite3
 import os
@@ -7,11 +8,13 @@ import re
 from typing import Tuple, Optional, List, Dict, Any
 
 from .config import settings
+from .db_adapter import DBConnectionInfo, create_db_adapter
 
 
 def execute_query(
     db_path: str, sql: str, max_rows: int = 100
 ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    """Выполнить SQL-запрос на SQLite по пути к файлу."""
     if not os.path.exists(db_path):
         return None, f"База данных не найдена: {db_path}"
     conn = None
@@ -35,6 +38,29 @@ def execute_query(
                 conn.close()
             except Exception:
                 pass
+
+
+def execute_query_adapter(
+    conn_info: DBConnectionInfo, sql: str, max_rows: int = 100
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    """Выполнить SQL-запрос на remote СУБД через адаптер."""
+    adapter = create_db_adapter(
+        db_type=conn_info.db_type,
+        host=conn_info.host,
+        port=conn_info.port,
+        user=conn_info.user,
+        password=conn_info.password,
+        database=conn_info.database,
+    )
+    ok, err = adapter.connect()
+    if not ok:
+        return None, err or "Не удалось подключиться к СУБД"
+    try:
+        limited_sql = _add_row_limit(sql, max_rows or settings.SQL_MAX_ROWS)
+        rows, exec_err = adapter.execute(limited_sql, max_rows or settings.SQL_MAX_ROWS)
+        return rows, exec_err
+    finally:
+        adapter.close()
 
 
 def _add_row_limit(sql: str, max_rows: int) -> str:
