@@ -81,7 +81,7 @@ def process_nl_query(
         add_step("LLM Generation", "error", error_msg, ms=elapsed)
         return result
 
-    add_step("LLM Generation", "success", "SQL сгенерирован", ms=elapsed)
+    add_step("LLM Generation", "success", "SQL сгенерирован через Gemini", ms=elapsed)
 
     # === Шаг 5: Validation ===
     t = time.time()

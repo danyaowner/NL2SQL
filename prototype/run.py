@@ -40,11 +40,11 @@ def main():
         for err in errors:
             print(f"\n[ERROR] {err}")
         print("\n[INFO] Создайте .env файл:")
-        print("  echo OPENROUTER_API_KEY=sk-or-v1-... > prototype/.env")
-        print("  Получить ключ: https://openrouter.ai/keys\n")
+        print("  echo GEMINI_API_KEY=your_key > prototype/.env")
+        print("  Получить ключ: https://aistudio.google.com/apikey\n")
     else:
-        print(f"[OK] OpenRouter API ключ: {settings.OPENROUTER_API_KEY[:15]}...")
-        print(f"[OK] Модель: {settings.OPENROUTER_MODEL}")
+        print(f"[OK] Gemini API ключ настроен")
+        print(f"[OK] Модель: {settings.GEMINI_MODEL}")
 
     # Проверяем БД
     if settings.DB_PATH and os.path.exists(settings.DB_PATH):

@@ -1,112 +1,111 @@
 """
-llm_client.py - Client for OpenRouter API with retry, timeout, error classification.
+llm_client.py — Клиент для Google Gemini API.
+С retry, таймаутом и классификацией ошибок.
 """
 import os
 import time
 import logging
 from typing import Optional, Tuple
-from openai import OpenAI
-from openai import APIError, RateLimitError, APITimeoutError, APIConnectionError
+
 from .config import settings
 
 logger = logging.getLogger("llm")
-_client: Optional[OpenAI] = None
 
-def _get_cached_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(
-            base_url=settings.OPENROUTER_BASE_URL,
-            api_key=settings.OPENROUTER_API_KEY,
-            timeout=settings.OPENROUTER_TIMEOUT,
-            default_headers={
-                "HTTP-Referer": "https://github.com/nl2sql",
-                "X-Title": "NL2SQL",
-            },
-        )
-    return _client
+HAS_GEMINI = False
+try:
+    from google import genai as _genai
+    HAS_GEMINI = True
+except ImportError:
+    pass
 
-def generate_sql(prompt, temperature=0.2, model=None, max_retries=2):
-    if not settings.OPENROUTER_API_KEY:
-        return None, "OPENROUTER_API_KEY not set"
-    model_to_use = model or settings.OPENROUTER_MODEL
-    last_error = None
+
+def generate_sql(prompt: str, temperature: float = 0.2, max_retries: int = 2) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Отправляет промпт в Gemini и получает SQL-запрос.
+    
+    Returns:
+        (sql, None) — успех
+        (None, error_detail) — ошибка с описанием
+    """
+    if not HAS_GEMINI:
+        return None, "Google Gemini SDK не установлен. Установите: pip install google-genai"
+
+    if not settings.GEMINI_API_KEY:
+        return None, "GEMINI_API_KEY не задан"
+
+    model_name = settings.GEMINI_MODEL
+    last_error: Optional[str] = None
+
     for attempt in range(max_retries + 1):
         try:
-            client = _get_cached_client()
-            response = client.chat.completions.create(
-                model=model_to_use,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                max_tokens=settings.OPENROUTER_MAX_TOKENS,
+            client = _genai.Client(api_key=settings.GEMINI_API_KEY)
+            logger.info(f"Gemini request: model={model_name}, attempt={attempt+1}")
+
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config={
+                    "temperature": temperature,
+                    "max_output_tokens": settings.GEMINI_MAX_TOKENS,
+                },
             )
-            raw = response.choices[0].message.content.strip() if response.choices else ""
-            if not raw:
-                last_error = "Empty response"
+            raw_output = response.text.strip() if response.text else ""
+
+            if not raw_output:
+                last_error = "Модель вернула пустой ответ"
                 if attempt < max_retries:
                     time.sleep(2)
                     continue
                 return None, last_error
-            sql = _extract_sql(raw)
+
+            sql = _extract_sql(raw_output)
             if sql:
                 return sql, None
-            last_error = "Could not extract SQL"
+
+            last_error = "Не удалось извлечь SQL из ответа"
             if attempt < max_retries:
                 continue
             return None, last_error
-        except RateLimitError:
-            last_error = "Rate limit (429). Try later."
-            if attempt < max_retries:
-                time.sleep((attempt + 1) * 3)
-                continue
-        except APITimeoutError:
-            last_error = "Request timeout"
-            if attempt < max_retries:
-                continue
-        except APIConnectionError as e:
-            last_error = f"Network error: {e}"
-            break
-        except APIError as e:
-            status = getattr(e, "status_code", 0)
-            if status == 401:
-                last_error = "Invalid API key"
-                break
-            elif status == 404:
-                last_error = f"Model not found: {model_to_use}"
-                break
-            elif status == 429:
-                last_error = "Rate limit (429)"
+
+        except Exception as e:
+            error_str = str(e).lower()
+            if "429" in error_str or "quota" in error_str or "rate" in error_str:
+                last_error = f"Превышен лимит запросов Gemini (429). Попробуйте позже."
                 if attempt < max_retries:
-                    time.sleep(3)
+                    time.sleep((attempt + 1) * 4)
+                    continue
+            elif "api key" in error_str or "unauthorized" in error_str or "401" in error_str:
+                last_error = "Неверный API ключ Gemini. Проверьте GEMINI_API_KEY."
+                break
+            elif "not found" in error_str or "model" in error_str and "not" in error_str:
+                last_error = f"Модель '{model_name}' не найдена или недоступна."
+                break
+            elif "timeout" in error_str or "deadline" in error_str:
+                last_error = "Таймаут запроса к Gemini."
+                if attempt < max_retries:
                     continue
             else:
-                last_error = f"API error ({status})"
+                last_error = f"Ошибка Gemini: {e}"
                 if attempt < max_retries:
                     time.sleep(2)
                     continue
-        except Exception as e:
-            last_error = f"Unexpected error: {e}"
-            break
-    if last_error and model_to_use != settings.OPENROUTER_FALLBACK_MODEL:
-        return generate_sql(prompt, temperature, settings.OPENROUTER_FALLBACK_MODEL, 1)
+
     return None, last_error
 
-def _extract_sql(text):
-    """Extract SQL from LLM response, handling markdown code blocks."""
+
+def _extract_sql(text: str) -> str:
+    """Извлекает SQL из ответа LLM, обрабатывая markdown-блоки."""
     text = text.strip()
-    # Handle ```sql ... ``` blocks
     if "```sql" in text:
         start = text.index("```sql") + 6
         rest = text[start:]
         end = rest.index("```") if "```" in rest else len(rest)
         return rest[:end].strip()
-    # Handle ``` ... ``` blocks
     if "```" in text:
         start = text.index("```") + 3
         rest = text[start:]
         end = rest.index("```") if "```" in rest else len(rest)
         return rest[:end].strip()
-    # Lines starting with SELECT or WITH
     for line in text.split("\n"):
         s = line.strip().upper()
         if s.startswith("SELECT") or s.startswith("WITH"):

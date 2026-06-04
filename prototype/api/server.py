@@ -64,7 +64,7 @@ _current_db = None
 
 app = FastAPI(
     title="NL2SQL API",
-    description="NL в SQL через нейросеть (OpenRouter)",
+    description="NL в SQL через нейросеть (Google Gemini)",
     version="3.0.0",
 )
 
@@ -79,8 +79,8 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     logger.info("Server starting...")
-    logger.info(f"Model: {settings.OPENROUTER_MODEL}")
-    logger.info(f"API key configured: {bool(settings.OPENROUTER_API_KEY)}")
+    logger.info(f"Model: {settings.GEMINI_MODEL}")
+    logger.info(f"API key configured: {bool(settings.GEMINI_API_KEY)}")
     if errors := settings.validate():
         for err in errors:
             logger.warning(f"Config: {err}")
@@ -129,14 +129,14 @@ async def upload_database(file: UploadFile = File(...)):
 
 @app.get("/api/health", response_model=HealthResponse)
 async def health_check():
-    path = _get_db_path()
-    db_loaded = path and os.path.exists(path)
+    path = _get_db_path() or ""
+    db_loaded = bool(path) and os.path.exists(path)
     errors = settings.validate()
     return HealthResponse(
         status="ok",
         db_loaded=db_loaded,
         db_path=path if db_loaded else None,
-        api_key_configured=bool(settings.OPENROUTER_API_KEY),
+        api_key_configured=bool(settings.GEMINI_API_KEY),
         errors=errors,
     )
 
@@ -161,8 +161,8 @@ async def process_query(request: QueryRequest):
         raise HTTPException(status_code=404, detail="База данных не найдена. Загрузите .db файл.")
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Запрос не может быть пустым")
-    if not settings.OPENROUTER_API_KEY:
-        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY не настроен. Сервер не может обрабатывать запросы.")
+    if not settings.GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY не настроен. Сервер не может обрабатывать запросы.")
     logger.info(f"Query: {request.query[:100]}")
     result = process_nl_query(request.query, db_path)
     return QueryResponse(**result)
