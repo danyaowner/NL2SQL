@@ -22,11 +22,6 @@
     <p class="upload-desc">Загрузите <strong>.db</strong> файл с вашей базой данных,<br>чтобы задавать вопросы на естественном языке</p>
 
     <div class="upload-actions">
-      <div class="upload-tabs">
-        <button class="upload-tab active" id="tabFile" onclick="switchUploadTab('file')">📁 Файл</button>
-        <button class="upload-tab" id="tabServer" onclick="switchUploadTab('server')">🔌 Сервер</button>
-      </div>
-
       <button class="btn-cancel-switch" onclick="cancelSwitchDB()" id="btnCancelSwitch" style="display:none">
         ← Вернуться к текущей базе
       </button>
@@ -44,47 +39,7 @@
       </div>
     </div>
 
-    <!-- Server connection form -->
-    <div class="upload-panel" id="panelServer" style="display:none">
-      <div class="connect-form">
-        <div class="form-group">
-          <label class="form-label">Тип СУБД</label>
-          <select id="connDialect" class="form-select">
-            <option value="postgresql">PostgreSQL</option>
-            <option value="mysql">MySQL</option>
-            <option value="sqlite">SQLite (по пути)</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <div class="form-group" style="flex:3">
-            <label class="form-label">Хост</label>
-            <input type="text" id="connHost" class="form-input" value="localhost" placeholder="localhost">
-          </div>
-          <div class="form-group" style="flex:1">
-            <label class="form-label">Порт</label>
-            <input type="number" id="connPort" class="form-input" value="5432" placeholder="5432">
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">База данных</label>
-          <input type="text" id="connDatabase" class="form-input" placeholder="my_database">
-        </div>
-        <div class="form-row">
-          <div class="form-group" style="flex:1">
-            <label class="form-label">Пользователь</label>
-            <input type="text" id="connUsername" class="form-input" placeholder="postgres">
-          </div>
-          <div class="form-group" style="flex:1">
-            <label class="form-label">Пароль</label>
-            <input type="password" id="connPassword" class="form-input" placeholder="••••••">
-          </div>
-        </div>
-        <button class="btn-connect" onclick="connectToServer()" id="btnConnect">
-          <span class="btn-demo-icon">🔗</span>
-          <span>Подключиться</span>
-        </button>
-      </div>
-    </div>
+
 
     <div class="db-upload-status" id="dbUploadStatus" style="display:none">
       <div class="db-upload-progress-bar">
