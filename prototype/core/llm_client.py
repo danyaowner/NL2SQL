@@ -1,50 +1,58 @@
 """
-llm_client.py — Клиент для Google Gemini API.
+llm_client.py — Клиент для OpenRouter API (OpenAI-совместимый).
 Отправляет промпт, получает SQL, обрабатывает ошибки.
-Использует бесплатный tier Google Gemini.
+Использует OpenRouter с моделью google/gemma-4-26b-a4b-it:free.
 """
 import os
 from typing import Optional
 
-HAS_GEMINI = False
+HAS_OPENAI = False
 
 try:
-    from google import genai as _genai_new
-    HAS_GEMINI = True
+    from openai import OpenAI
+    HAS_OPENAI = True
 except ImportError:
     pass
 
 
-def _get_client():
-    """Инициализация клиента Gemini API."""
-    if not HAS_GEMINI:
+def _get_client() -> OpenAI:
+    """Инициализация клиента OpenRouter API."""
+    if not HAS_OPENAI:
         raise ImportError(
-            "Google Gemini SDK not installed. "
-            "Run: pip install google-genai"
+            "OpenAI SDK not installed. "
+            "Run: pip install openai"
         )
 
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         try:
             from dotenv import load_dotenv
             load_dotenv()
-            api_key = os.environ.get("GEMINI_API_KEY", "")
+            api_key = os.environ.get("OPENROUTER_API_KEY", "")
         except ImportError:
             pass
 
     if not api_key:
         raise ValueError(
-            "GEMINI_API_KEY не найден. Установите переменную окружения "
-            "или создайте .env файл с GEMINI_API_KEY=your_key_here\n"
-            "Получить ключ: https://aistudio.google.com/apikey"
+            "OPENROUTER_API_KEY не найден. Установите переменную окружения "
+            "или создайте .env файл с OPENROUTER_API_KEY=your_key_here\n"
+            "Получить ключ: https://openrouter.ai/keys"
         )
 
-    return api_key
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+        default_headers={
+            "HTTP-Referer": "https://github.com/nl2sql",
+            "X-Title": "NL2SQL",
+        },
+    )
+    return client
 
 
 def generate_sql(prompt: str, temperature: float = 0.2) -> Optional[str]:
     """
-    Отправляет промпт в Gemini и получает SQL-запрос.
+    Отправляет промпт в OpenRouter и получает SQL-запрос.
 
     Args:
         prompt: Полный промпт с инструкциями, схемой и запросом пользователя
@@ -54,30 +62,32 @@ def generate_sql(prompt: str, temperature: float = 0.2) -> Optional[str]:
         Строка с SQL-запросом или None при ошибке
     """
     try:
-        api_key = _get_client()
+        client = _get_client()
     except (ImportError, ValueError) as e:
         print(f"[LLM] Ошибка инициализации: {e}")
         return None
 
-    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = os.environ.get("OPENROUTER_MODEL", "openrouter/free")
 
     try:
-        client = _genai_new.Client(api_key=api_key)
-        response = client.models.generate_content(
+        response = client.chat.completions.create(
             model=model_name,
-            contents=prompt,
-            config={
-                "temperature": temperature,
-                "max_output_tokens": 1000,
-            },
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            temperature=temperature,
+            max_tokens=1000,
         )
-        raw_output = response.text.strip() if response.text else ""
+        raw_output = response.choices[0].message.content.strip() if response.choices else ""
 
         if not raw_output:
-            print("[LLM] Пустой ответ от Gemini")
+            print("[LLM] Пустой ответ от OpenRouter")
             return None
 
-        # Извлекаем SQL из ответа (Gemini может обернуть в markdown)
+        # Извлекаем SQL из ответа (LLM может обернуть в markdown)
         sql = _extract_sql(raw_output)
         return sql
 

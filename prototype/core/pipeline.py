@@ -25,7 +25,7 @@ def process_nl_query(
     1. Preprocessing — очистка текста
     2. Schema Introspection — чтение схемы БД
     3. Prompt Building — сборка промпта для LLM
-    4. LLM Generation — генерация SQL через Gemini
+    4. LLM Generation — генерация SQL через OpenRouter
     5. Validation — проверка безопасности и синтаксиса
     6. Execution — выполнение SQL и получение результатов
 
@@ -123,11 +123,11 @@ def process_nl_query(
     result["sql"] = sql
 
     if not sql:
-        result["error"] = "LLM не смогла сгенерировать SQL. Проверьте GEMINI_API_KEY."
+        result["error"] = "LLM не смогла сгенерировать SQL. Проверьте OPENROUTER_API_KEY."
         result["steps"].append({
             "name": "LLM Generation",
             "status": "error",
-            "detail": "Не получен SQL от Gemini",
+            "detail": "Не получен SQL от OpenRouter",
             "ms": int((time.time() - step_start) * 1000),
         })
         return result
@@ -135,7 +135,7 @@ def process_nl_query(
     result["steps"].append({
         "name": "LLM Generation",
         "status": "success",
-        "detail": f"SQL сгенерирован через Gemini",
+        "detail": f"SQL сгенерирован через OpenRouter",
         "ms": int((time.time() - step_start) * 1000),
     })
 

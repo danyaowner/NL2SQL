@@ -1,5 +1,5 @@
 # NL2SQL — Neural NL→SQL Converter
-# Все преобразование NL→SQL идёт только через Gemini (без keyword matching)
+# Все преобразование NL→SQL идёт только через LLM (без keyword matching)
 
 # Веб-фреймворк
 fastapi>=0.110.0
@@ -8,8 +8,8 @@ psycopg2-binary>=2.9.9
 pymysql>=1.1.1
 python-multipart>=0.0.9
 
-# LLM: Google Gemini
-google-genai>=1.0.0
+# LLM: OpenRouter (OpenAI-compatible)
+openai>=1.0.0
 
 # Работа с SQL
 sqlparse>=0.5.0

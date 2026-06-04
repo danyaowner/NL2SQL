@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-test_proto.py — End-to-end тесты через Gemini-пайплайн (core.pipeline).
-Требует GEMINI_API_KEY в окружении или .env файле.
+test_proto.py — End-to-end тесты через OpenRouter-пайплайн (core.pipeline).
+Требует OPENROUTER_API_KEY в окружении или .env файле.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.pipeline import process_nl_query
 
 print("="*60)
-print("NL2SQL PROTOTYPE - END-TO-END TEST (Gemini pipeline)")
+print("NL2SQL PROTOTYPE - END-TO-END TEST (OpenRouter pipeline)")
 print("="*60)
 
 test_queries = [

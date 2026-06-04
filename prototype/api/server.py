@@ -184,14 +184,14 @@ async def health_check():
     """Проверка состояния системы."""
     path = _get_db_path()
     db_loaded = os.path.exists(path)
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
     # Проверяем .env если ключ не в окружении
     if not api_key:
         try:
             from dotenv import load_dotenv
             load_dotenv()
-            api_key = os.environ.get("GEMINI_API_KEY", "")
+            api_key = os.environ.get("OPENROUTER_API_KEY", "")
         except ImportError:
             pass
 
@@ -232,7 +232,7 @@ async def process_query(request: QueryRequest):
     1. Preprocessing (очистка текста)
     2. Schema Introspection (чтение схемы БД)
     3. Prompt Building (сборка промпта для LLM)
-    4. LLM Generation (Gemini генерирует SQL)
+    4. LLM Generation (OpenRouter генерирует SQL)
     5. Validation (проверка безопасности)
     6. Execution (выполнение SQL)
     """

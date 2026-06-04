@@ -1,5 +1,5 @@
 """
-core — модули NL2SQL системы на основе LLM (Google Gemini)
+core — модули NL2SQL системы на основе LLM (OpenRouter)
 Без keyword matching, вся генерация SQL через нейросеть.
 """
 

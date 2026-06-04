@@ -17,7 +17,7 @@ DB_PATH = os.environ.get("DB_PATH", "")
 
 
 def process_query_full(query_text):
-    """Process NL query through Gemini pipeline - NO keyword matching."""
+    """Process NL query through OpenRouter pipeline - NO keyword matching."""
     if not os.path.exists(DB_PATH):
         return {"query": query_text, "sql": None, "rows": None, "error": "DB not found", "success": False}
     result = process_nl_query(query_text, DB_PATH)

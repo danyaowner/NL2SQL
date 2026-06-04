@@ -37,7 +37,7 @@ def get_schema_info():
 
 
 def process_query_full(query_text):
-    """Process NL query through Gemini pipeline - NO keyword matching."""
+    """Process NL query through LLM pipeline - NO keyword matching."""
     if current_db is None or not os.path.exists(current_db):
         return {"query": query_text, "steps": [], "sql": None, "rows": None, "error": "No database loaded", "success": False}
     return process_nl_query(query_text, current_db)

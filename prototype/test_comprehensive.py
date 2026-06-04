@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-test_comprehensive.py — Comprehensive NL2SQL testing via Gemini pipeline (core.pipeline).
-Requires GEMINI_API_KEY in environment or .env file.
-Respects Gemini free tier rate limit (~15 RPM) with 4s delay between requests.
+test_comprehensive.py — Comprehensive NL2SQL testing via OpenRouter pipeline (core.pipeline).
+Requires OPENROUTER_API_KEY in environment or .env file.
 """
 import sys, os, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,14 +13,14 @@ _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 if os.path.exists(_env_path):
     with open(_env_path) as _f:
         for _line in _f:
-            if _line.startswith("GEMINI_API_KEY="):
-                os.environ["GEMINI_API_KEY"] = _line.split("=", 1)[1].strip()
+            if _line.startswith("OPENROUTER_API_KEY="):
+                os.environ["OPENROUTER_API_KEY"] = _line.split("=", 1)[1].strip()
                 break
 
 db_path = os.environ.get("DB_PATH", "")
 has_db = os.path.exists(db_path)
 
-# Rate limiting: Gemini free tier = 15 RPM, so 4s between requests
+# Rate limiting between requests
 DELAY_SECONDS = 4
 MAX_RETRIES = 1
 RETRY_DELAY = 8
@@ -300,15 +299,15 @@ def get_category_label(cat):
     return labels.get(cat, cat)
 
 print("=" * 70)
-print("NL2SQL PROTOTYPE - FULL TESTING (Gemini pipeline)")
+print("NL2SQL PROTOTYPE - FULL TESTING (OpenRouter pipeline)")
 print("=" * 70)
 print(f"Total queries: {len(test_queries)}")
 print(f"Database: {'Yes' if has_db else 'NO!'}")
-print(f"Mode: Gemini LLM (no keyword matching)")
+print(f"Mode: OpenRouter LLM (no keyword matching)")
 print("=" * 70)
 
 for q, category in test_queries:
-    # Rate limiting: respect Gemini free tier (skip first request)
+    # Rate limiting between requests
     if results["pass"] + results["fail"] > 0:
         time.sleep(DELAY_SECONDS)
     

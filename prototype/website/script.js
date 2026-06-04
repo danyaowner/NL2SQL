@@ -254,8 +254,8 @@ async function checkHealthAndInit() {
       if (dot) dot.className = 'status-dot online';
       if (status.api_key_configured) {
         if (text) text.textContent = status.db_loaded
-          ? 'Neural (Gemini) | DB: ' + (status.db_path || '').split('/').pop()
-          : 'Neural (Gemini) | No DB';
+          ? 'Neural (OpenRouter) | DB: ' + (status.db_path || '').split('/').pop()
+          : 'Neural (OpenRouter) | No DB';
       } else {
         if (text) text.textContent = status.db_loaded
           ? 'API key missing!' : 'Server OK';

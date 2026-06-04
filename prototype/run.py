@@ -54,7 +54,7 @@ def main():
         os.environ["DB_PATH"] = args.db
 
     # Проверяем наличие API ключа
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+    api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         try:
             from dotenv import load_dotenv
@@ -62,7 +62,7 @@ def main():
             for env_path in [".env", "prototype/.env", "../.env"]:
                 if os.path.exists(env_path):
                     load_dotenv(env_path)
-                    api_key = os.environ.get("GEMINI_API_KEY", "")
+                    api_key = os.environ.get("OPENROUTER_API_KEY", "")
                     if api_key:
                         break
         except ImportError:
@@ -74,10 +74,10 @@ def main():
     print("=" * 50)
 
     if not api_key:
-        print("\n[WARN] GEMINI_API_KEY не найден!")
+        print("\n[WARN] OPENROUTER_API_KEY не найден!")
         print("[WARN] Создайте .env файл с ключом:")
-        print("[WARN]   echo GEMINI_API_KEY=your_key > prototype/.env")
-        print("[WARN] Получить ключ: https://aistudio.google.com/apikey")
+        print("[WARN]   echo OPENROUTER_API_KEY=your_key > prototype/.env")
+        print("[WARN] Получить ключ: https://openrouter.ai/keys")
         print()
 
     # Проверяем БД
