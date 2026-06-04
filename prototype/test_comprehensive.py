@@ -18,7 +18,7 @@ if os.path.exists(_env_path):
                 os.environ["GEMINI_API_KEY"] = _line.split("=", 1)[1].strip()
                 break
 
-db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_company.db")
+db_path = os.environ.get("DB_PATH", "")
 has_db = os.path.exists(db_path)
 
 # Rate limiting: Gemini free tier = 15 RPM, so 4s between requests

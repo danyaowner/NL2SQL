@@ -13,7 +13,7 @@ from core.pipeline import process_nl_query
 from core.schema_manager import introspect_schema, get_schema_summary
 import sqlite3
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_company.db")
+DB_PATH = os.environ.get("DB_PATH", "")
 
 
 def process_query_full(query_text):

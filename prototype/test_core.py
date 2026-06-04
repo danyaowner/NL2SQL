@@ -22,16 +22,17 @@ assert not ok2, "DROP should be blocked"
 print("   OK")
 
 # 3. Schema Manager
-if os.path.exists('test_company.db'):
+_test_db = os.environ.get("DB_PATH")
+if _test_db and os.path.exists(_test_db):
     from core.schema_manager import introspect_schema, format_schema_for_prompt
-    schema = introspect_schema('test_company.db')
+    schema = introspect_schema(_test_db)
     print(f"3. Schema: {len(schema)} tables: {list(schema.keys())}")
     assert len(schema) > 0, "Schema should have tables"
     text = format_schema_for_prompt(schema)
     print(f"   Schema text length: {len(text)} chars")
     print("   OK")
 else:
-    print("3. Schema: test_company.db not found, skipping")
+    print(f"3. Schema: DB_PATH not set or file not found, skipping")
 
 # 4. Prompt Builder
 from core.prompt_builder import build_prompt
@@ -57,14 +58,14 @@ assert sql3 == "SELECT * FROM users"
 print("   OK")
 
 # 6. Executor
-if os.path.exists('test_company.db'):
+if _test_db and os.path.exists(_test_db):
     from core.executor import execute_query
-    rows, err = execute_query('test_company.db', 'SELECT 1 as test')
+    rows, err = execute_query(_test_db, 'SELECT 1 as test')
     print(f"6. Executor: rows={rows}, error={err}")
     assert err is None, f"Should not error: {err}"
     assert len(rows) >= 1, "Should have at least 1 row"
     print("   OK")
 else:
-    print("6. Executor: test_company.db not found, skipping")
+    print(f"6. Executor: DB_PATH not set or file not found, skipping")
 
 print("\n=== ALL TESTS PASSED ===")

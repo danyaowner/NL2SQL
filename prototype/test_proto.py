@@ -22,9 +22,9 @@ test_queries = [
     "найди всех сотрудников с фамилией иванов",
 ]
 
-db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_company.db")
+db_path = os.environ.get("DB_PATH", "")
 if not os.path.exists(db_path):
-    print("ERROR: test_company.db not found! Run: python3 init_db.py --clean")
+    print(f"ERROR: Database not found at {db_path}! Set DB_PATH env or place a .db file.")
     sys.exit(1)
 
 passed = 0

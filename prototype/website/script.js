@@ -64,14 +64,6 @@ const API = {
       xhr.send(formData);
     });
   },
-  async initDemoDB() {
-    const res = await fetch(API._url('init-demo-db'), { method: 'POST' });
-    if (!res.ok) {
-      const err = await res.json().catch(function() { return {}; });
-      throw new Error(err.error || ('HTTP ' + res.status));
-    }
-    return res.json();
-  },
   async connectDB(params) {
     const res = await fetch(API._url('connect-db'), {
       method: 'POST',
@@ -112,7 +104,6 @@ function switchUploadTab(tab) {
   var tabServer = document.getElementById('tabServer');
   var panelFile = document.getElementById('panelFile');
   var panelServer = document.getElementById('panelServer');
-  var btnDemo = document.getElementById('btnDemo');
   var dropZone = document.getElementById('dbDropZone');
   var uploadStatus = document.getElementById('dbUploadStatus');
   var errorEl = document.getElementById('dbError');
@@ -122,7 +113,6 @@ function switchUploadTab(tab) {
     tabServer.classList.remove('active');
     panelFile.style.display = '';
     panelServer.style.display = 'none';
-    if (btnDemo) btnDemo.style.display = '';
     if (dropZone) dropZone.style.display = '';
     if (uploadStatus) uploadStatus.style.display = 'none';
     if (errorEl) errorEl.style.display = 'none';
@@ -131,7 +121,6 @@ function switchUploadTab(tab) {
     tabFile.classList.remove('active');
     panelServer.style.display = '';
     panelFile.style.display = 'none';
-    if (btnDemo) btnDemo.style.display = 'none';
     if (errorEl) errorEl.style.display = 'none';
     // Авто-порт при смене диалекта
     var dialect = document.getElementById('connDialect');
@@ -306,11 +295,9 @@ async function startUpload(file) {
         var isSwitch = uploadMode === 'switch';
         onDatabaseLoaded(result.name, isSwitch);
         if (isSwitch) {
-          // Сброс кнопок загрузочного экрана
+          // Reset upload screen buttons
           var btnCancel = document.getElementById('btnCancelSwitch');
-          var btnDemo = document.getElementById('btnDemo');
           if (btnCancel) btnCancel.style.display = 'none';
-          if (btnDemo) btnDemo.style.display = '';
           uploadMode = 'initial';
         }
       }, 600);
@@ -681,13 +668,11 @@ function copySQL() {
 function switchDatabase() {
   uploadMode = 'switch';
 
-  // Показать кнопку отмены, скрыть демо
+  // Show cancel button, reset upload state
   var btnCancel = document.getElementById('btnCancelSwitch');
-  var btnDemo = document.getElementById('btnDemo');
   if (btnCancel) btnCancel.style.display = '';
-  if (btnDemo) btnDemo.style.display = 'none';
 
-  // Сбросить состояние загрузки
+  // Reset upload state
   document.getElementById('dbDropZone').style.display = '';
   document.getElementById('dbUploadStatus').style.display = 'none';
   document.getElementById('dbError').style.display = 'none';
@@ -700,45 +685,11 @@ function switchDatabase() {
 function cancelSwitchDB() {
   uploadMode = 'initial';
 
-  // Скрыть экран загрузки, показать интерфейс
+  // Hide upload screen, show interface
   document.getElementById('uploadScreen').style.display = 'none';
   document.getElementById('mainContent').style.display = '';
 
-  // Сбросить кнопки
+  // Reset buttons
   var btnCancel = document.getElementById('btnCancelSwitch');
-  var btnDemo = document.getElementById('btnDemo');
   if (btnCancel) btnCancel.style.display = 'none';
-  if (btnDemo) btnDemo.style.display = '';
-}
-
-async function initDemoDB() {
-  var btnDemo = document.getElementById('btnDemo');
-  var dropZone = document.getElementById('dbDropZone');
-  var uploadStatus = document.getElementById('dbUploadStatus');
-  var uploadText = document.getElementById('dbUploadText');
-  var errorEl = document.getElementById('dbError');
-
-  btnDemo.disabled = true;
-  btnDemo.innerHTML = '<span class="step-loader" style="width:14px;height:14px;border-width:2px;margin-right:6px"></span> Загрузка...';
-  errorEl.style.display = 'none';
-
-  try {
-    var result = await API.initDemoDB();
-    if (result.success) {
-      dropZone.style.display = 'none';
-      uploadStatus.style.display = 'block';
-      uploadText.textContent = '✅ ' + result.name + ' — демо-база загружена!';
-
-      setTimeout(function() {
-        onDatabaseLoaded('Демо-компания', true);
-      }, 800);
-    } else {
-      showUploadError(result.error || 'Demo init error');
-    }
-  } catch (e) {
-    showUploadError(e.message);
-  } finally {
-    btnDemo.disabled = false;
-    btnDemo.innerHTML = '<span class="btn-demo-icon">🚀</span><span>Попробовать демо</span>';
-  }
 }

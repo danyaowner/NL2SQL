@@ -2,32 +2,17 @@
 llm_client.py — Клиент для Google Gemini API.
 Отправляет промпт, получает SQL, обрабатывает ошибки.
 Использует бесплатный tier Google Gemini.
-
-Поддерживает как google-genai (новый SDK), так и google-generativeai (legacy).
 """
 import os
 from typing import Optional
 
-# Пробуем новый SDK (google-genai), затем legacy (google-generativeai)
 HAS_GEMINI = False
-_genai_module = None
 
-# Новый SDK: google-genai
 try:
     from google import genai as _genai_new
     HAS_GEMINI = True
-    _genai_module = "new"  # google-genai
 except ImportError:
     pass
-
-# Legacy SDK: google-generativeai
-if not HAS_GEMINI:
-    try:
-        import google.generativeai as _genai_legacy
-        HAS_GEMINI = True
-        _genai_module = "legacy"  # google-generativeai
-    except ImportError:
-        pass
 
 
 def _get_client():
@@ -35,13 +20,11 @@ def _get_client():
     if not HAS_GEMINI:
         raise ImportError(
             "Google Gemini SDK not installed. "
-            "Run: pip install google-genai (новый SDK) "
-            "или pip install google-generativeai (legacy)"
+            "Run: pip install google-genai"
         )
 
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
-        # Попробуем .env файл
         try:
             from dotenv import load_dotenv
             load_dotenv()
@@ -79,30 +62,16 @@ def generate_sql(prompt: str, temperature: float = 0.2) -> Optional[str]:
     model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
     try:
-        if _genai_module == "new":
-            # Новый SDK: google-genai
-            client = _genai_new.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-                config={
-                    "temperature": temperature,
-                    "max_output_tokens": 1000,
-                },
-            )
-            raw_output = response.text.strip() if response.text else ""
-        else:
-            # Legacy SDK: google-generativeai
-            _genai_legacy.configure(api_key=api_key)
-            model = _genai_legacy.GenerativeModel(
-                model_name=model_name,
-                generation_config={
-                    "temperature": temperature,
-                    "max_output_tokens": 1000,
-                },
-            )
-            response = model.generate_content(prompt)
-            raw_output = response.text.strip() if response.text else ""
+        client = _genai_new.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config={
+                "temperature": temperature,
+                "max_output_tokens": 1000,
+            },
+        )
+        raw_output = response.text.strip() if response.text else ""
 
         if not raw_output:
             print("[LLM] Пустой ответ от Gemini")

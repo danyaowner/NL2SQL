@@ -1,6 +1,6 @@
-# NL2SQL Prototype - Техническая документация
+# NL2SQL — Техническая документация
 
-## Разработка прототипа интеллектуального интерфейса для генерации SQL-запросов на основе естественного языка
+## Преобразование естественного языка в SQL через Google Gemini
 
 ---
 
@@ -8,350 +8,329 @@
 
 1. [Общая архитектура](#1-общая-архитектура)
 2. [Структура проекта](#2-структура-проекта)
-3. [nl_module.py - Обработка естественного языка](#3-nl-module-py)
-4. [schema_selector.py - Селекция схемы данных](#4-schema-selector-py)
-5. [sql_generator.py - Генерация SQL](#5-sql-generator-py)
-6. [validator.py - Валидация SQL](#6-validator-py)
-7. [app.py - Streamlit UI](#7-app-py)
-8. [init_db.py - База данных](#8-init-db-py)
-9. [test_proto.py - End-to-end тесты](#9-test-proto-py)
-10. [Схема данных](#10-схема-данных)
-11. [Полный pipeline обработки запроса](#11-pipeline)
-12. [Примеры работы](#12-примеры-работы)
-13. [Известные проблемы и ограничения](#13-проблемы)
-14. [Пути улучшения](#14-пути-улучшения)
+3. [API сервер (FastAPI)](#3-api-сервер-fastapi)
+4. [Core модули](#4-core-модули)
+5. [База данных](#5-база-данных)
+6. [Полный pipeline обработки запроса](#6-pipeline)
+7. [Веб-интерфейс (Frontend)](#7-веб-интерфейс-frontend)
+8. [Тестирование](#8-тестирование)
+9. [Запуск проекта](#9-запуск-проекта)
+10. [Стек технологий](#10-стек-технологий)
 
 
 # 1. Общая архитектура
 
 ## 1.1. Концепция
 
-Система NL2SQL представляет собой пайплайн из 5 последовательных модулен, каждый из которых выполняет строго определённую функцию преобразования.
+NL2SQL — это веб-приложение, которое принимает запрос на естественном языке (русском или английском) и преобразует его в SQL-запрос через Google Gemini LLM, затем выполняет его на подключённой базе данных и возвращает результат.
 
+## 1.2. Pipeline
 
+```
+Пользователь → FastAPI → Preprocessor → Schema Manager → Prompt Builder → Gemini → SQL Validator → Executor → Результат
+```
 
-## 1.2. Ключевые принципы проектирования
+Все преобразования идут исключительно через Gemini — никакого keyword matching или правил.
 
-| Принцип | Обоснование |
-|---------|-------------|
-| Lazy imports | Приложение не падает при отсутствии зависимостей |
-| Два режима | Demo (бесплатно) и Full (OpenAI GPT-4o) |
-| Правила, а не ML | NLP на словарях и регэкспах |
-| Изоляция модулей | Каждый модуль работает независимо |
-| Graceful degradation | Информативные сообщения об ошибках |
+## 1.3. Поддерживаемые СУБД
 
-## 1.3. Формат данных
+| СУБД | Режим | Адаптер |
+|------|-------|---------|
+| SQLite | Файловый / через адаптер | `executor.py` / `db_adapter.py` |
+| PostgreSQL | Через адаптер | `db_adapter.py` |
+| MySQL | Через адаптер | `db_adapter.py` |
 
-Модули общаются через словари Python.
+## 1.4. Ключевые принципы
 
-
-**qi (NLP-анализ):**
-
-
+| Принцип | Описание |
+|---------|----------|
+| LLM-only | Никаких правил — только Gemini генерирует SQL |
+| Безопасность | Только SELECT, блокировка DROP/DELETE/INSERT/UPDATE |
+| Динамическая схема | Интроспекция через PRAGMA (SQLite) или information_schema |
+| Read-only | Все запросы выполняются в режиме только для чтения |
+| Модульность | Каждый модуль core/ изолирован и тестируется независимо |
 
 
 # 2. Структура проекта
 
-
-
-
-
-# 3. Модуль 1: nl_module.py - Обработка естественного языка
-
-**Назначение:** Преобразование текста в структурированные данные.
-
-**Функции:**
-| Функция | Назначение |
-|---------|-----------|
-| clean_query() | Удаление спецсимволов, лишних пробелов |
-| detect_language() | Определение RU/EN (langdetect или кириллица) |
-| extract_entities() | Поиск таблиц (employees) и отделов (department:) |
-| classify_query() | Определение типа: count/find/aggregate/compare |
-| extract_conditions() | Извлечение условии (salary > 100000) |
-| extract_numbers() | Числа из текста (цифры + прописью) |
-| process_query() | Главная - вызывает все функции и возвращает dict |
-
-**Типы запросов:**
-- count: сколько, количество, how many, count
-- find: найди, покажи, find, show, display
-- aggregate: среднее, сумма, avg, sum, maximum
-- compare: сравни, топ, compare, top, highest
-
-
-
-# 4. Модуль 2: schema_selector.py - Селекция схемы данных
-
-**Назначение:** Выбор релевантных таблиц и колонок.
-
-## 4.1. select_tables_keyword()
-Скоринг таблиц по ключевым словам. Если найдено -> score +1. Если таблица упомянута явно -> +3.
-Связанные таблицы добавляются через TABLE_RELATIONS: tasks -> employees + projects.
-Fallback: ["employees", "projects"]
-
-## 4.2. select_columns_keyword()
-Сортирует колонки каждой таблицы по релевантности.
-
-## 4.3. select_schema()
-Главная функция. Возвращает dict с tables, columns и text для OpenAI.
-
-
-
-# 5. Модуль 3: sql_generator.py - Генерация SQL
-
-**Назначение:** Сердце системы. Преобразует структурированный запрос в SQL.
-
-## 5.1. Два режима
-- **Demo** - генерация по правилам, без API
-- **Full** - через OpenAI GPT-4o (few-shot с 3 примерами)
-
-## 5.2. Demo-режим: _demo_generate()
-
-**SELECT:** count->COUNT(*), aggregate->AVG()/SUM()/MAX(), find->*
-**FROM/JOIN:** автоматический выбор JOIN по комбинации таблиц
-**WHERE:** из conditions + entities (department:) через AND
-**GROUP BY:** по project_name или department
-**ORDER BY/LIMIT:** для топ/best/highest
-
-## 5.3. Full-режим: _openai_generate()
-Few-shot промптинг: 3 примера + схема БД + запрос пользователя.
-Модель: gpt-4o, temperature=0.2, max_tokens=1000.
-Постобработка: извлечение SQL из markdown-ответа.
-
-
-
-# 6. Модуль 4: validator.py - Валидация SQL
-
-**Назначение:** Проверка SQL на корректность и безопасность.
-
-## 6.1. validate_syntax()
-1. Парсинг через sqlparse
-2. Проверка: первый токен = SELECT
-3. Блокировка: DROP, DELETE, INSERT, UPDATE, ALTER, CREATE, TRUNCATE
-
-## 6.2. validate_schema()
-Проверка существования таблиц в схеме БД.
-
-## 6.3. validate()
-Объединяет оба шага + форматирует SQL через sqlparse.
-Возвращает (True, formatted_sql) или (False, error_message).
-
-
-
-# 7. Модуль 5: app.py - Streamlit UI
-
-**Назначение:** Веб-интерфейс.
-
-## 7.1. Структура
-2 колонки (2:1):
-- **col1 (левая):** поле ввода, прогресс 1/5->5/5, результаты
-- **col2 (правая):** схема БД в expander-секция
-
-## 7.2. 5 шагов обработки
-1/5 NLP-анализ (process_query)
-2/5 Выбор схемы (select_schema)
-3/5 Генерация SQL (generate)
-4/5 Валидация (validate)
-5/5 Выполнение (run_sql)
-
-## 7.3. run_sql()
-conn.row_factory = sqlite3.Row - строки как dict для st.dataframe.
-
-
-
-# 8. Модуль 6: init_db.py - База данных
-
-**Назначение:** Создание и наполнение тестовой БД SQLite.
-
-**4 таблицы:**
-- employees - 15 сотрудников (5 отделов)
-- projects - 8 проектов (active/completed/on_hold)
-- tasks - 25 задач (low/medium/high/critical priority)
-- comments - 30 комментариев (28 публичных, 2 внутренних)
-
-**Связи:** employees.employee_id -> tasks.assignee_id -> comments.author_id
-projects.project_id -> tasks.project_id
-tasks.task_id -> comments.task_id
-employees.manager_id -> employees.employee_id (self-ref)
-
-**get_schema():** возвращает мета-описание для валидатора.
-**--clean:** удаляет .db перед созданием.
-
-
-
-# 9. Модуль 7: test_proto.py - E2E тесты
-
-**Назначение:** Сквозное тестирование.
-
-**6 тестов:**
-1. Найди всех сотрудников отдела разработки
-2. Сколько задач в каждом проекте
-3. Покажи сотрудников с зарплатой выше 100000
-4. Средняя зарплата по отделам (проблема с priority)
-5. Show all employees in sales department
-6. Find projects with budget over 300000
-
-**Результат:** 6/6 passed.
-
-
-
-# 10. Схема данных
-
-## Распределение сотрудников
-
-| Отдел | Кол-во | Зарплаты |
-|-------|--------|----------|
-| Разработка | 6 | 80000-180000 |
-| Продажи | 3 | 70000-120000 |
-| Маркетинг | 2 | 90000-130000 |
-| Бухгалтерия | 2 | 95000-105000 |
-| HR | 2 | 70000-110000 |
-
-
-
-# 11. Полный pipeline
-
-**Запрос:** "Найди всех сотрудников отдела разработки"
-
-**Шаг 1:** process_query -> lang=ru, type=find, entities=[employees, department:Разработка]
-**Шаг 2:** select_schema -> tables=[employees]
-**Шаг 3:** generate -> SELECT * FROM employees WHERE department = "Разработка"
-**Шаг 4:** validate -> PASSED
-**Шаг 5:** run_sql -> 6 rows (Иванов, Петрова, Васильев, ...)
-
-
-
-# 12. Примеры работы
-
-| # | Запрос | SQL | Результат |
-|---|--------|-----|-----------|
-| 1 | Найди всех сотрудников отдела разработки | SELECT * FROM employees WHERE department = "Разработка" | 6 rows |
-| 2 | Сколько задач в каждом проекте | SELECT p.project_name, COUNT(*) FROM projects p LEFT JOIN tasks t ... GROUP BY project_name | 8 rows |
-| 3 | Сотрудники с зарплатой выше 100000 | SELECT * FROM employees WHERE salary > 100000 | 8 rows |
-| 4 | Средняя зарплата по отделам | SELECT department, AVG(salary) FROM employees GROUP BY department | 5 rows |
-| 5 | Show all employees in sales | SELECT * FROM employees WHERE department = "Продажи" | 3 rows |
-| 6 | Find projects with budget > 300000 | SELECT * FROM projects WHERE budget > 300000 | 3 rows |
-
-
-
-# 13. Известные проблемы и ограничения
-
-## Критические
-- **Путаница "средняя"**: слово "средн" совпадает для AVG и medium priority
-  Запрос "средняя зарплата" добавляет лишнее условие priority=medium
-
-## Функциональные
-- Только AND, нет OR
-- Только SQLite, нет PostgreSQL/MySQL
-- Одна фиксированная БД, нет переключения
-- Нет кэширования
-- Ограниченный словарь (~30 ключевых слов)
-- Нет подзапросов в demo-режиме
-- Однопоточный Streamlit
-- Full-режим требует платный API-ключ OpenAI
-
-
-
-# 14. Пути улучшения
-
-## Quick wins
-1. Исправить путаницу "средняя" - проверять контекст перед добавлением priority
-2. Дополнить словари синонимов
-3. Добавить поддержку OR в WHERE
-4. Кэширование частых запросов
-
-## Среднесрочные
-1. Sentence-transformers вместо ключевых слов
-2. Динамическая схема через PRAGMA table_info
-3. Поддержка PostgreSQL через psycopg2
-4. Оконные функции (ROW_NUMBER, RANK)
-5. История запросов в UI
-
-## Фундаментальные
-1. Локальная LLM (Llama 3, Mistral) вместо правил
-2. Multi-Turn диалог с уточняющими вопросами
-3. RAG с векторной БД для повторного использования
-4. EXPLAIN ANALYZE перед выполнением
-5. Дашборд метрик (latency, accuracy)
-
----
-*Документация создана автоматически на основе анализа исходного кода.*
-
-
-
-
-
-
-
-# 15. Запуск проекта
-
-## 15.1. Локальный запуск (Windows cmd)
-
-Откройте **командную строку (cmd)** или **PowerShell** и выполните:
-
-```cmd
-cd C:/Users/Danila/OneDrive/Desktop/agent/prototype
-python -m pip install -r requirements.txt
-python init_db.py --clean
-python -m streamlit run app.py
+```
+prototype/
+├── api/
+│   └── server.py          # FastAPI сервер (REST API)
+├── core/
+│   ├── pipeline.py         # Оркестратор пайплайна
+│   ├── llm_client.py       # Gemini API клиент
+│   ├── schema_manager.py   # Интроспекция схемы БД
+│   ├── prompt_builder.py   # Сборка промпта для LLM
+│   ├── sql_validator.py    # Валидация и безопасность SQL
+│   ├── executor.py         # Выполнение SQL (SQLite, read-only)
+│   ├── preprocessor.py     # Очистка текста
+│   └── db_adapter.py       # Адаптер PostgreSQL/MySQL
+├── website/
+│   ├── index.html          # Главная страница (SPA)
+│   ├── styles.css          # Стили
+│   ├── script.js           # Логика фронтенда
+│   └── report.html         # Страница отчёта
+├── run.py                  # Точка входа (uvicorn)
+├── test_core.py            # Тесты ядра (без API ключа)
+├── test_proto.py           # E2E тесты (требуют Gemini)
+├── test_comprehensive.py   # Полный набор (~160 запросов)
+├── test_introspect.py      # Проверка интроспекции БД
+├── requirements.txt        # Зависимости
+├── Procfile                # Heroku
+├── vercel.json             # Vercel (фронтенд)
+└── TECHNICAL_DESCRIPTION.md
 ```
 
-После запуска Streamlit сам откроет браузер с адресом **http://localhost:8501**
 
-## 15.2. Запуск из WSL (Linux)
+# 3. API сервер (FastAPI)
+
+**Файл:** `api/server.py`
+
+## 3.1. Эндпоинты
+
+| Метод | Путь | Назначение |
+|-------|------|-----------|
+| `POST` | `/api/query` | Главный: NL → SQL → выполнение |
+| `GET` | `/api/schema` | Схема активной БД |
+| `GET` | `/api/health` | Проверка состояния |
+| `POST` | `/api/upload-database` | Загрузка `.db` файла |
+| `POST` | `/api/connect-db` | Подключение к PostgreSQL/MySQL |
+
+## 3.2. Pydantic модели
+
+- `QueryRequest` — входящий запрос: `{query: str}`
+- `QueryResponse` — результат: SQL, строки, колонки, ошибки, timing
+- `SchemaResponse` — схема: таблицы, колонки, размеры
+- `ConnectRequest` — параметры подключения к СУБД
+- `HealthResponse` — статус системы
+
+## 3.3. Особенности
+
+- **CORS middleware** — разрешены все источники
+- **StaticFiles** — раздаёт `website/` как SPA
+- **Auto-reload** — не используется в продакшене
+- **Swagger** — авто-документация на `/docs`
+
+
+# 4. Core модули
+
+## 4.1. Preprocessor (`preprocessor.py`)
+
+Минимальная очистка текста:
+- Удаление лишних пробелов
+- Удаление управляющих символов
+- **Без** извлечения сущностей, классификации, keyword matching
+
+```python
+clean_query("  Find   all   employees  ")  # → "Find all employees"
+```
+
+## 4.2. Schema Manager (`schema_manager.py`)
+
+Динамическая интроспекция SQLite через `PRAGMA`:
+- `introspect_schema(db_path)` — читает таблицы, колонки, типы, FK, примеры данных
+- `format_schema_for_prompt(schema)` — форматирует для LLM-промпта
+- `get_schema_summary(schema)` — краткая сводка для UI
+
+**Не использует хардкод** — всё читается из БД.
+
+## 4.3. Prompt Builder (`prompt_builder.py`)
+
+Собирает промпт для Gemini из:
+1. **System instructions** — роль SQL-эксперта, правила (только SELECT, только из схемы)
+2. **Схема БД** — таблицы, колонки, внешние ключи, примеры данных
+3. **Few-shot примеры** — 7 пар (запрос → SQL) для повышения точности
+4. **Запрос пользователя**
+
+Учитывает диалект СУБД (SQLite/PostgreSQL/MySQL).
+
+## 4.4. LLM Client (`llm_client.py`)
+
+Клиент для Google Gemini API:
+- Использует **только** новый SDK: `google-genai`
+- Модель по умолчанию: `gemini-2.5-flash` (меняется через `GEMINI_MODEL`)
+- Temperature: 0.2 (почти детерминированно)
+- `_extract_sql()` — извлекает чистый SQL из ответа (убирает markdown, пояснения)
+- API ключ из `GEMINI_API_KEY` (окружение или `.env`)
+
+## 4.5. SQL Validator (`sql_validator.py`)
+
+Проверка безопасности и синтаксиса:
+- **Блокировка** опасных операторов: DROP, DELETE, INSERT, UPDATE, ALTER, CREATE, TRUNCATE, etc.
+- **Только SELECT/WITH** — проверка первого слова
+- **Один запрос** — множественные statements запрещены
+- **Форматирование** — через `sqlparse` (upper case keywords, reindent)
+
+## 4.6. Executor (`executor.py`)
+
+Безопасное выполнение SQL (SQLite):
+- **Read-only** транзакции (`PRAGMA query_only = ON`)
+- **URI mode** — `file:path?mode=ro`
+- **Лимит строк** — `max_rows` (по умолчанию 100)
+- **Row factory** — строки возвращаются как `dict`
+
+## 4.7. Pipeline (`pipeline.py`)
+
+Оркестратор — связывает все модули в единый процесс:
+
+```
+1. Preprocessing  →  clean_query()
+2. Schema         →  introspect_schema() / adapter.get_full_schema()
+3. Prompt         →  build_prompt()
+4. LLM            →  generate_sql()
+5. Validation     →  validate()
+6. Execution      →  execute_query() / adapter.execute()
+```
+
+Каждый шаг логирует статус, время и детали в `result["steps"]`.
+
+## 4.8. DB Adapter (`db_adapter.py`)
+
+Универсальный адаптер для разных СУБД:
+- `connect()` / `close()` / `is_connected`
+- `get_tables()` — список таблиц
+- `get_full_schema()` — полная схема
+- `execute(sql)` — выполнение запроса
+
+
+# 5. База данных
+
+## 5.1. Загрузка базы данных
+
+База данных загружается пользователем через веб-интерфейс (`.db` файл через `/api/upload-database`) или подключается к внешней СУБД (PostgreSQL/MySQL через `/api/connect-db`). Также можно указать путь к `.db` файлу через `--db` при запуске.
+
+## 5.2. Связи (пример)
+
+```
+employees.manager_id  →  employees.employee_id  (самоссылка)
+tasks.assignee_id     →  employees.employee_id
+tasks.project_id      →  projects.project_id
+comments.task_id      →  tasks.task_id
+comments.author_id    →  employees.employee_id
+```
+
+
+
+# 6. Pipeline
+
+**Пример:** *«Найди всех сотрудников отдела разработки»*
+
+| Шаг | Модуль | Результат |
+|-----|--------|-----------|
+| 1 | Preprocessor | `"Найди всех сотрудников отдела разработки"` |
+| 2 | Schema Manager | 4 таблицы: employees(15), projects(8), tasks(25), comments(30) |
+| 3 | Prompt Builder | ~1600 символов: инструкции + схема + few-shot + запрос |
+| 4 | Gemini | `SELECT * FROM employees WHERE department = 'Разработка'` |
+| 5 | Validator | PASSED, форматирован |
+| 6 | Executor | 6 rows (Иванов, Петрова, Васильев, Белова, Новикова, Алексеев) |
+
+
+# 7. Веб-интерфейс (Frontend)
+
+**Директория:** `prototype/website/`
+
+Чистый HTML/CSS/JS (без фреймворков):
+- `index.html` — главная SPA: поле ввода, результаты, схема БД
+- `report.html` — страница отчёта
+- `styles.css` — стили (адаптивный дизайн)
+- `script.js` — логика: запросы к API, отображение результатов
+
+Раздаётся FastAPI как статические файлы.
+
+
+# 8. Тестирование
+
+## 8.1. test_core.py — базовые тесты
+
+Тестирует модули **без API-ключа Gemini**:
+- Preprocessor: очистка текста
+- SQL Validator: валидация, блокировка DROP
+- Schema Manager: чтение схемы, форматирование
+- Prompt Builder: сборка промпта
+- LLM Client: извлечение SQL из ответа
+- Executor: выполнение SQL
 
 ```bash
-cd /mnt/c/Users/Danila/OneDrive/Desktop/agent/prototype
-pip3 install -r requirements.txt
-python3 init_db.py --clean
-python3 -m streamlit run app.py --server.headless true
+python3 prototype/test_core.py
 ```
 
-Доступ в браузере Windows: **http://172.19.2.43:8501**
+## 8.2. test_proto.py — E2E тесты
 
-## 15.3. Запуск из клонированного репозитория
+7 запросов через полный pipeline (требует `GEMINI_API_KEY`).
 
-```cmd
-cd C:/Users/Danila/OneDrive/Desktop
-git clone https://github.com/danyaowner/NL2SQL.git
-cd NL2SQL\prototype
-python -m pip install -r requirements.txt
-python init_db.py --clean
-python -m streamlit run app.py
-```
+## 8.3. test_comprehensive.py — полный набор
 
-## 15.4. Инициализация базы данных
+~160 тестовых запросов по категориям:
+- Простые SELECT, COUNT
+- Фильтрация (по отделу, зарплате, дате, должности)
+- Сортировка, агрегации
+- GROUP BY, HAVING
+- JOIN (все комбинации таблиц)
+- Самоссылка (manager_id)
+- Поиск по тексту, работа с датами
+- Сложные аналитические запросы
+- Естественные формулировки
+- Негативные тесты (несуществующие таблицы)
 
-```cmd
+Rate limiting: 4s между запросами (Gemini free tier = 15 RPM).
+
+
+# 9. Запуск проекта
+
+## 9.1. Установка
+
+```bash
 cd prototype
-python init_db.py --clean
+pip install -r requirements.txt
 ```
 
-Флаг --clean удаляет существующую БД перед созданием.
+## 9.2. Конфигурация
 
-## 15.5. Запуск тестов
-
-```cmd
-cd prototype
-python test_proto.py
+Создать `.env` файл в `prototype/`:
+```
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-2.5-flash
 ```
 
-Ожидаемый результат: **All 6 tests PASSED**
+Получить ключ: https://aistudio.google.com/apikey
 
-## 15.6. Установка зависимостей
+## 9.3. Загрузка БД
 
-```cmd
-cd prototype
-python -m pip install -r requirements.txt
+Загрузите `.db` файл через веб-интерфейс или укажите путь через `--db`.
+
+## 9.4. Запуск сервера
+
+```bash
+python run.py                # http://localhost:8000
+python run.py --port 3000    # другой порт
+python run.py --no-browser   # без авто-открытия браузера
 ```
 
-### Полный список зависимостей:
+## 9.5. Запуск тестов
 
-- streamlit - веб-интерфейс
-- sqlparse - форматирование SQL
-- langdetect - определение языка (RU/EN)
-- nltk - NLP-обработка
-- dateparser - парсинг дат
-- openai - (опционально) для FULL-режима с GPT-4o
+```bash
+python test_core.py           # базовые (без API ключа)
+python test_proto.py          # E2E (нужен GEMINI_API_KEY)
+python test_comprehensive.py  # полный набор ~160 запросов (нужен GEMINI_API_KEY)
+python test_introspect.py     # интроспекция БД
+```
+
+
+# 10. Стек технологий
+
+| Компонент | Технология |
+|-----------|-----------|
+| Язык | Python 3.x |
+| Веб-фреймворк | FastAPI + uvicorn |
+| LLM | Google Gemini (`google-genai`) |
+| Базы данных | SQLite, PostgreSQL, MySQL |
+| SQL парсинг | `sqlparse` |
+| Валидация | Pydantic v2 |
+| Фронтенд | HTML5 + CSS + vanilla JS |
+| Деплой | Vercel (фронтенд), Heroku (бэкенд) |
+| Окружение | `python-dotenv` |
 
 ---
-*Документация создана автоматически на основе анализа исходного кода.*
+
+*Документация обновлена: июнь 2026. Соответствует текущей архитектуре.*

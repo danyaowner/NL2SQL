@@ -40,12 +40,6 @@ except ImportError:
     HAS_DB_ADAPTER = False
 
 
-def _init_demo_database():
-    """Ленивый импорт init_db — не роняет сервер при ошибке."""
-    from init_db import init_database as _do_init
-    _do_init()
-
-
 # === Модели данных ===
 
 class QueryRequest(BaseModel):
@@ -107,7 +101,6 @@ class HealthResponse(BaseModel):
 # === Конфигурация ===
 
 BASE_DIR = Path(__file__).parent.parent
-DEFAULT_DB = BASE_DIR / "test_company.db"
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "nl2sql_uploads"
 
 # Текущая активная БД (может меняться при upload)
@@ -131,34 +124,20 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """При старте: авто-создание demo БД, если её нет."""
+    """При старте: инициализация сервера."""
     print("[STARTUP] NL2SQL server starting...", flush=True)
     print(f"[STARTUP] Python: {sys.version}", flush=True)
     print(f"[STARTUP] PORT env: {os.environ.get('PORT', 'not set')}", flush=True)
-    demo_path = str(DEFAULT_DB)
-    print(f"[STARTUP] Demo DB path: {demo_path}", flush=True)
-    if not os.path.exists(demo_path):
-        try:
-            _init_demo_database()
-            print(f"[STARTUP] Demo database created: {demo_path}", flush=True)
-        except Exception as e:
-            print(f"[STARTUP] Could not create demo database: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
-    else:
-        print(f"[STARTUP] Demo DB already exists", flush=True)
     print("[STARTUP] Ready to accept connections", flush=True)
 
 
 def _get_db_path() -> str:
     """Определяет путь к активной БД."""
     global _current_db
-    # Если была загружена пользовательская БД — используем её
     if _current_db and os.path.exists(_current_db):
         return _current_db
-    # Иначе — дефолтная
-    db_path = os.environ.get("DB_PATH", str(DEFAULT_DB))
-    if os.path.exists(db_path):
+    db_path = os.environ.get("DB_PATH", "")
+    if db_path and os.path.exists(db_path):
         _current_db = db_path
     return db_path
 
@@ -262,9 +241,9 @@ async def connect_database(req: ConnectRequest):
 
     # Создаём адаптер
     if dialect == "sqlite":
-        db_path = req.db_path or str(DEFAULT_DB)
-        if not os.path.exists(db_path):
-            return ConnectResponse(success=False, error=f"Файл БД не найден: {db_path}")
+        db_path = req.db_path
+        if not db_path or not os.path.exists(db_path):
+            return ConnectResponse(success=False, error=f"Файл БД не найден: {db_path or '(путь не указан)'}")
         adapter = DatabaseAdapter(dialect="sqlite", db_path=db_path)
     else:
         adapter = DatabaseAdapter(
@@ -293,47 +272,13 @@ async def connect_database(req: ConnectRequest):
 
     _db_adapter = adapter
     if dialect == "sqlite":
-        _current_db = req.db_path or str(DEFAULT_DB)
+        _current_db = req.db_path
 
     return ConnectResponse(
         success=True,
         name=adapter.display_name,
         dialect=dialect,
         tables_count=len(tables),
-    )
-
-
-@app.post("/api/init-demo-db", response_model=UploadResponse)
-async def init_demo_db():
-    """Инициализация встроенной демо-БД (одним кликом)."""
-    global _current_db
-    demo_path = str(DEFAULT_DB)
-
-    if not os.path.exists(demo_path):
-        try:
-            _init_demo_database()
-        except Exception as e:
-            return UploadResponse(
-                success=False,
-                error=f"Не удалось создать демо-БД: {e}"
-            )
-
-    if not os.path.exists(demo_path):
-        return UploadResponse(
-            success=False,
-            error="Не удалось создать демо-БД"
-        )
-
-    _current_db = demo_path
-    # Закрываем старый адаптер если был
-    global _db_adapter
-    if _db_adapter:
-        _db_adapter.close()
-        _db_adapter = None
-    return UploadResponse(
-        success=True,
-        name=DEFAULT_DB.name,
-        original_name="demo (тестовая компания)",
     )
 
 

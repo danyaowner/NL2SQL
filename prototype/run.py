@@ -81,12 +81,13 @@ def main():
         print()
 
     # Проверяем БД
-    db_path = os.environ.get("DB_PATH", "prototype/test_company.db")
-    if os.path.exists(db_path):
+    db_path = os.environ.get("DB_PATH", "")
+    if db_path and os.path.exists(db_path):
         print(f"[OK] База данных: {db_path}")
     else:
-        print(f"[WARN] База данных не найдена: {db_path}")
-        print("[WARN] Загрузите .db файл через веб-интерфейс")
+        if db_path:
+            print(f"[WARN] База данных не найдена: {db_path}")
+        print("[INFO] Загрузите .db файл через веб-интерфейс")
 
     url = f"http://localhost:{args.port}"
     print(f"\n[OK] Сервер запускается на {url}")

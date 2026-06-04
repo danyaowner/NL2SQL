@@ -22,17 +22,9 @@ import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(tempfile.gettempdir(), "nl2sql_uploads"))
-DEFAULT_DB = os.path.join(BASE_DIR, "test_company.db")
 
 # Current selected database (None until user uploads one)
 current_db = None
-
-
-def _init_default_database():
-    """Подключить встроенную тестовую БД, если она есть."""
-    global current_db
-    if os.path.exists(DEFAULT_DB):
-        current_db = DEFAULT_DB
 
 
 def get_schema_info():
@@ -208,11 +200,6 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
                 self._handle_upload()
             except Exception as e:
                 self._send_json({"success": False, "error": f"Ошибка загрузки: {str(e)}"})
-        elif path == "/api/init-demo-db":
-            try:
-                self._handle_init_demo_db()
-            except Exception as e:
-                self._send_json({"success": False, "error": f"Ошибка инициализации демо-БД: {str(e)}"})
         else:
             self.send_error(404, "Not found")
 
@@ -280,26 +267,6 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
             "original_name": original_filename
         })
 
-    def _handle_init_demo_db(self):
-        """Инициализация встроенной демо-БД."""
-        global current_db
-        from init_db import init_database, DB_PATH as DEMO_DB_PATH
-
-        # Создаём демо-БД, если её ещё нет
-        if not os.path.exists(DEMO_DB_PATH):
-            init_database()
-
-        if not os.path.exists(DEMO_DB_PATH):
-            self._send_json({"success": False, "error": "Не удалось создать демо-БД"})
-            return
-
-        current_db = DEMO_DB_PATH
-        self._send_json({
-            "success": True,
-            "name": os.path.basename(DEMO_DB_PATH),
-            "original_name": "demo (тестовая компания)"
-        })
-
     def _send_json(self, data):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -333,7 +300,6 @@ def main():
     port = int(os.environ.get("PORT", 8000))
     server_address = ("", port)
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    _init_default_database()
     httpd = http.server.HTTPServer(server_address, APIHandler)
     print("NL2SQL Prototype Website")
     print("=" * 40)
