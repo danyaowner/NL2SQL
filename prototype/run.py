@@ -1,115 +1,86 @@
 """
 run.py — Точка входа NL2SQL системы.
-Запускает FastAPI сервер с авто-открытием браузера.
-
-Использование:
-    python run.py              # Запуск на порту 8000
-    python run.py --port 3000  # Запуск на порту 3000
 """
 import os
 import sys
 import argparse
-import threading
-import webbrowser
+import logging
 
+from core.config import settings, load_env
 
-def open_browser(url: str, delay: float = 1.5):
-    """Открывает браузер с задержкой."""
-    def _open():
-        import time
-        time.sleep(delay)
-        try:
-            if os.name == "nt":
-                webbrowser.open(url)
-            else:
-                webbrowser.open(url)
-            print(f"[OK] Браузер открыт: {url}")
-        except Exception as e:
-            print(f"[INFO] Браузер не открыт: {e}")
-            print(f"[INFO] Откройте {url} вручную")
-
-    threading.Thread(target=_open, daemon=True).start()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(name)s] %(levelname)s: %(message)s')
+logger = logging.getLogger("run")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="NL2SQL — преобразование русского языка в SQL через нейросеть"
-    )
-    parser.add_argument(
-        "--port", type=int, default=8000,
-        help="Порт для сервера (по умолчанию: 8000)"
-    )
-    parser.add_argument(
-        "--no-browser", action="store_true",
-        help="Не открывать браузер автоматически"
-    )
-    parser.add_argument(
-        "--db", type=str, default=None,
-        help="Путь к SQLite базе данных"
-    )
+    parser = argparse.ArgumentParser(description="NL2SQL — преобразование русского языка в SQL через нейросеть")
+    parser.add_argument("--port", type=int, default=None, help="Порт для сервера")
+    parser.add_argument("--no-browser", action="store_true", help="Не открывать браузер")
+    parser.add_argument("--db", type=str, default=None, help="Путь к SQLite базе")
     args = parser.parse_args()
 
-    # Устанавливаем переменные окружения
+    # Загружаем .env
+    load_env()
+    settings._load()
+
+    if args.port:
+        os.environ["PORT"] = str(args.port)
+        settings._load()
     if args.db:
         os.environ["DB_PATH"] = args.db
-
-    # Проверяем наличие API ключа
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not api_key:
-        try:
-            from dotenv import load_dotenv
-            # Ищем .env в текущей директории и родительской
-            for env_path in [".env", "prototype/.env", "../.env"]:
-                if os.path.exists(env_path):
-                    load_dotenv(env_path)
-                    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-                    if api_key:
-                        break
-        except ImportError:
-            pass
+        settings._load()
 
     print("=" * 50)
     print("  NL2SQL — Neural NL→SQL Converter")
-    print("  Курсовая работа: Преобразование NL в SQL")
     print("=" * 50)
 
-    if not api_key:
-        print("\n[WARN] OPENROUTER_API_KEY не найден!")
-        print("[WARN] Создайте .env файл с ключом:")
-        print("[WARN]   echo OPENROUTER_API_KEY=your_key > prototype/.env")
-        print("[WARN] Получить ключ: https://openrouter.ai/keys")
-        print()
+    # Валидация API ключа
+    errors = settings.validate()
+    if errors:
+        for err in errors:
+            print(f"\n[ERROR] {err}")
+        print("\n[INFO] Создайте .env файл:")
+        print("  echo OPENROUTER_API_KEY=sk-or-v1-... > prototype/.env")
+        print("  Получить ключ: https://openrouter.ai/keys\n")
+    else:
+        print(f"[OK] OpenRouter API ключ: {settings.OPENROUTER_API_KEY[:15]}...")
+        print(f"[OK] Модель: {settings.OPENROUTER_MODEL}")
 
     # Проверяем БД
-    db_path = os.environ.get("DB_PATH", "")
-    if db_path and os.path.exists(db_path):
-        print(f"[OK] База данных: {db_path}")
+    if settings.DB_PATH and os.path.exists(settings.DB_PATH):
+        print(f"[OK] База данных: {settings.DB_PATH}")
     else:
-        if db_path:
-            print(f"[WARN] База данных не найдена: {db_path}")
+        if settings.DB_PATH:
+            print(f"[WARN] База не найдена: {settings.DB_PATH}")
         print("[INFO] Загрузите .db файл через веб-интерфейс")
 
-    url = f"http://localhost:{args.port}"
+    url = f"http://localhost:{settings.PORT}"
     print(f"\n[OK] Сервер запускается на {url}")
-    print(f"[OK] API документация: {url}/docs")
+    print(f"[OK] API: {url}/docs")
     print("[OK] Нажмите Ctrl+C для остановки\n")
 
-    # Авто-открытие браузера
-    if not args.no_browser:
-        open_browser(url)
+    if not errors and not args.no_browser:
+        import threading, webbrowser
+        def _open():
+            import time
+            time.sleep(1.5)
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+        threading.Thread(target=_open, daemon=True).start()
 
-    # Запуск FastAPI через uvicorn
     try:
         import uvicorn
         uvicorn.run(
             "api.server:app",
             host="0.0.0.0",
-            port=args.port,
+            port=settings.PORT,
             reload=False,
             log_level="info",
         )
     except ImportError:
-        print("[ERROR] uvicorn не установлен. Установите: pip install uvicorn")
+        print("[ERROR] uvicorn не установлен. pip install uvicorn")
         sys.exit(1)
 
 

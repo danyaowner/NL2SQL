@@ -1,48 +1,76 @@
 // ─── Configuration ────────────────────────────────────────────────────
 const API_BASE_URL = window.__API_BACKEND_URL || '';
+const API_TIMEOUT = 60000; // 60 seconds max wait
 
 const API = {
   _url(path) {
     return API_BASE_URL + '/api/' + path;
   },
+  async fetchWithTimeout(path, options, timeoutMs) {
+    const controller = new AbortController();
+    const timeout = setTimeout(function() { controller.abort(); }, timeoutMs || API_TIMEOUT);
+    try {
+      const res = await fetch(API._url(path), { ...options, signal: controller.signal });
+      return res;
+    } finally {
+      clearTimeout(timeout);
+    }
+  },
   async getSchema() {
-    const res = await fetch(API._url('schema'));
+    const res = await API.fetchWithTimeout('schema', { method: 'GET' }, 10000);
     if (!res.ok) {
       const err = await res.json().catch(function() { return {}; });
-      throw new Error(err.detail || 'Schema fetch error');
+      throw new Error(err.detail || 'Schema fetch error (' + res.status + ')');
     }
     return res.json();
   },
   async getHealth() {
-    const res = await fetch(API._url('health'));
+    const res = await API.fetchWithTimeout('health', { method: 'GET' }, 10000);
     return res.json();
   },
   async submitQuery(query) {
-    const res = await fetch(API._url('query'), {
+    const res = await API.fetchWithTimeout('query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: query }),
-    });
+    }, 90000);
     if (!res.ok) {
       const err = await res.json().catch(function() { return {}; });
-      throw new Error(err.detail || 'Query error (' + res.status + ')');
+      const msg = err.detail || err.error || ('HTTP ' + res.status);
+      // Отображаем более понятные ошибки
+      if (res.status === 503) {
+        throw new Error('API ключ не настроен. Свяжитесь с администратором.');
+      }
+      if (res.status === 404) {
+        throw new Error('База данных не найдена. Загрузите .db файл.');
+      }
+      throw new Error(msg);
     }
-    return res.json();
+    if (res.status === 204) {
+      return { error: 'Сервер вернул пустой ответ' };
+    }
+    const text = await res.text();
+    if (!text) {
+      return { error: 'Пустой ответ от сервера' };
+    }
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      throw new Error('Неверный формат ответа от сервера');
+    }
   },
   async uploadDatabase(file, onProgress) {
     return new Promise(function(resolve, reject) {
       var formData = new FormData();
       formData.append('file', file);
-
       var xhr = new XMLHttpRequest();
       xhr.open('POST', API._url('upload-database'));
-
+      xhr.timeout = 30000;
       xhr.upload.onprogress = function(e) {
         if (onProgress && e.lengthComputable) {
           onProgress(Math.round((e.loaded / e.total) * 100));
         }
       };
-
       xhr.onload = function() {
         var text = xhr.responseText || '';
         try {
@@ -56,34 +84,33 @@ const API = {
           reject(new Error('Invalid server response (HTTP ' + xhr.status + ')'));
         }
       };
-
       xhr.onerror = function() {
         reject(new Error('Upload failed. Check backend connection.'));
       };
-
+      xhr.ontimeout = function() {
+        reject(new Error('Upload timed out. File may be too large.'));
+      };
       xhr.send(formData);
     });
   },
 };
 
 const QUICK_QUERIES = [
-  "Найди всех сотрудников отдела разработки",
-  "Сколько задач в каждом проекте",
-  "Средняя зарплата по отделам",
-  "Покажи сотрудников с зарплатой выше 100000",
-  "Топ-5 проектов по бюджету",
+  "\u041d\u0430\u0439\u0434\u0438 \u0432\u0441\u0435\u0445 \u0441\u043e\u0442\u0440\u0443\u0434\u043d\u0438\u043a\u043e\u0432 \u043e\u0442\u0434\u0435\u043b\u0430 \u0440\u0430\u0437\u0440\u0430\u0431\u043e\u0442\u043a\u0438",
+  "\u0421\u043a\u043e\u043b\u044c\u043a\u043e \u0437\u0430\u0434\u0430\u0447 \u0432 \u043a\u0430\u0436\u0434\u043e\u043c \u043f\u0440\u043e\u0435\u043a\u0442\u0435",
+  "\u0421\u0440\u0435\u0434\u043d\u044f\u044f \u0437\u0430\u0440\u043f\u043b\u0430\u0442\u0430 \u043f\u043e \u043e\u0442\u0434\u0435\u043b\u0430\u043c",
+  "\u041f\u043e\u043a\u0430\u0436\u0438 \u0441\u043e\u0442\u0440\u0443\u0434\u043d\u0438\u043a\u043e\u0432 \u0441 \u0437\u0430\u0440\u043f\u043b\u0430\u0442\u043e\u0439 \u0432\u044b\u0448\u0435 100000",
+  "\u0422\u043e\u043f-5 \u043f\u0440\u043e\u0435\u043a\u0442\u043e\u0432 \u043f\u043e \u0431\u044e\u0434\u0436\u0435\u0442\u0443",
 ];
 
 const PIPELINE_ICONS = {
-  'Preprocessing': '🔍',
-  'Schema': '📚',
-  'Prompt': '📝',
-  'LLM Generation': '🤖',
-  'Validation': '✅',
-  'Execution': '🚀',
+  'Preprocessing': '\ud83d\udd0d',
+  'Schema': '\ud83d\udcda',
+  'Prompt': '\ud83d\udcdd',
+  'LLM Generation': '\ud83e\udd16',
+  'Validation': '\u2705',
+  'Execution': '\ud83d\ude80',
 };
-
-// ─── Init ────────────────────────────────────────────────────────────
 
 // ─── Init ────────────────────────────────────────────────────────────
 
@@ -101,38 +128,22 @@ window.addEventListener('DOMContentLoaded', function() {
 
 // ─── Upload Screen ───────────────────────────────────────────────────
 
-var uploadMode = 'initial'; // 'initial' | 'switch'
+var uploadMode = 'initial';
 
 function initUpload() {
   var dropZone = document.getElementById('dbDropZone');
   var fileInput = document.getElementById('dbFileInput');
   if (!dropZone) return;
-
-  dropZone.addEventListener('click', function() {
-    fileInput.click();
-  });
-
+  dropZone.addEventListener('click', function() { fileInput.click(); });
   fileInput.addEventListener('change', function() {
     if (fileInput.files.length > 0) {
       startUpload(fileInput.files[0]);
       fileInput.value = '';
     }
   });
-
-  dropZone.addEventListener('dragenter', function(e) {
-    e.preventDefault();
-    dropZone.classList.add('db-dragover');
-  });
-
-  dropZone.addEventListener('dragover', function(e) {
-    e.preventDefault();
-    dropZone.classList.add('db-dragover');
-  });
-
-  dropZone.addEventListener('dragleave', function(e) {
-    dropZone.classList.remove('db-dragover');
-  });
-
+  dropZone.addEventListener('dragenter', function(e) { e.preventDefault(); dropZone.classList.add('db-dragover'); });
+  dropZone.addEventListener('dragover', function(e) { e.preventDefault(); dropZone.classList.add('db-dragover'); });
+  dropZone.addEventListener('dragleave', function(e) { dropZone.classList.remove('db-dragover'); });
   dropZone.addEventListener('drop', function(e) {
     e.preventDefault();
     dropZone.classList.remove('db-dragover');
@@ -154,28 +165,23 @@ async function startUpload(file) {
   var progressFill = document.getElementById('dbUploadProgress');
   var progressText = document.getElementById('dbUploadText');
   var errorEl = document.getElementById('dbError');
-
   errorEl.style.display = 'none';
   dropZone.style.display = 'none';
   uploadStatus.style.display = 'block';
   progressFill.style.width = '0%';
   progressText.textContent = 'Uploading ' + file.name + '...';
-
   try {
     var result = await API.uploadDatabase(file, function(pct) {
       progressFill.style.width = pct + '%';
       progressText.textContent = 'Uploading... ' + pct + '%';
     });
-
     if (result.success) {
       progressFill.style.width = '100%';
-      progressText.textContent = '✅ ' + result.name + ' loaded!';
-
+      progressText.textContent = '\u2705 ' + result.name + ' loaded!';
       setTimeout(function() {
         var isSwitch = uploadMode === 'switch';
         onDatabaseLoaded(result.name, isSwitch);
         if (isSwitch) {
-          // Reset upload screen buttons
           var btnCancel = document.getElementById('btnCancelSwitch');
           if (btnCancel) btnCancel.style.display = 'none';
           uploadMode = 'initial';
@@ -193,40 +199,28 @@ function showUploadError(msg) {
   var dropZone = document.getElementById('dbDropZone');
   var uploadStatus = document.getElementById('dbUploadStatus');
   var errorEl = document.getElementById('dbError');
-
   dropZone.style.display = '';
   uploadStatus.style.display = 'none';
   errorEl.style.display = 'block';
-  errorEl.textContent = '❌ ' + msg;
+  errorEl.textContent = '\u274c ' + msg;
 }
 
 function onDatabaseLoaded(name, clearHistoryFlag) {
   document.getElementById('uploadScreen').style.display = 'none';
   document.getElementById('mainContent').style.display = '';
-
   var statusText = document.getElementById('statusText');
   if (statusText) statusText.textContent = 'DB: ' + name;
-
   var dbHeaderName = document.getElementById('dbHeaderName');
   if (dbHeaderName) dbHeaderName.textContent = name;
-
   var schemaDesc = document.getElementById('schemaDesc');
   if (schemaDesc) schemaDesc.textContent = 'Auto-detected from: ' + name;
-
-  if (clearHistoryFlag) {
-    clearHistory();
-  }
-
-  // Hide results on DB switch
+  if (clearHistoryFlag) clearHistory();
   document.getElementById('resultsSection').style.display = 'none';
   document.getElementById('sqlCard').style.display = 'none';
   document.getElementById('tableCard').style.display = 'none';
   document.getElementById('errorCard').style.display = 'none';
-
   loadSchema();
 }
-
-// ─── Query Interface ─────────────────────────────────────────────────
 
 function renderQuickTags() {
   var container = document.getElementById('quickTags');
@@ -245,13 +239,15 @@ async function checkHealthAndInit() {
   var dot = document.getElementById('statusDot');
   var text = document.getElementById('statusText');
   try {
-    var controller = new AbortController();
-    var timeout = setTimeout(function() { controller.abort(); }, 5000);
-    var res = await fetch(API_BASE_URL + '/api/health', { signal: controller.signal });
-    clearTimeout(timeout);
+    var res = await API.fetchWithTimeout('health', { method: 'GET' }, 10000);
     var status = await res.json();
     if (status.status === 'ok') {
       if (dot) dot.className = 'status-dot online';
+      if (status.errors && status.errors.length > 0) {
+        if (text) text.textContent = status.errors[0];
+        showUploadError(status.errors[0]);
+        return;
+      }
       if (status.api_key_configured) {
         if (text) text.textContent = status.db_loaded
           ? 'Neural (OpenRouter) | DB: ' + (status.db_path || '').split('/').pop()
@@ -276,50 +272,38 @@ async function loadSchema() {
     var schema = await API.getSchema();
     var grid = document.getElementById('schemaGrid');
     grid.innerHTML = '';
-
     if (!schema.tables || Object.keys(schema.tables).length === 0) {
       grid.innerHTML = '<div class="schema-loading">No tables found in database</div>';
       return;
     }
-
     Object.entries(schema.tables).forEach(function(entry) {
       var name = entry[0];
       var info = entry[1];
       var card = document.createElement('div');
       card.className = 'schema-table';
-
       var cols = info.columns || [];
       var lis = '';
       for (var i = 0; i < cols.length; i++) {
         lis += '<li>' + cols[i] + '</li>';
       }
-
-      card.innerHTML =
-        '<h3>' + name + '</h3>' +
-        '<div class="table-desc">' + (info.row_count || 0) + ' records</div>' +
-        '<ul>' + lis + '</ul>';
+      card.innerHTML = '<h3>' + name + '</h3><div class="table-desc">' + (info.row_count || 0) + ' records</div><ul>' + lis + '</ul>';
       grid.appendChild(card);
     });
   } catch (e) {
     var grid = document.getElementById('schemaGrid');
-    if (grid) grid.innerHTML = '<div class="schema-loading" style="color:var(--red)">Error loading schema: ' + e.message + '</div>';
+    if (grid) grid.innerHTML = '<div class="schema-loading" style="color:var(--red)">Error: ' + e.message + '</div>';
   }
 }
-
-// ─── Query Submission ────────────────────────────────────────────────
 
 async function submitQuery() {
   var input = document.getElementById('queryInput');
   var query = input.value.trim();
   if (!query) return;
-
   var btn = document.getElementById('submitBtn');
   btn.disabled = true;
   btn.innerHTML = '<span class="step-loader" style="width:18px;height:18px;border-width:2px"></span> Processing...';
-
   document.getElementById('resultsSection').style.display = 'none';
   document.getElementById('errorCard').style.display = 'none';
-
   try {
     var result = await API.submitQuery(query);
     renderResults(result);
@@ -327,7 +311,7 @@ async function submitQuery() {
     showError(e.message || 'Connection error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = '<span class="btn-icon">⚡</span> Run';
+    btn.innerHTML = '<span class="btn-icon">\u26a1</span> Run';
   }
 }
 
@@ -336,28 +320,21 @@ function renderResults(result) {
     showError(result.error);
     return;
   }
-
   document.getElementById('resultsSection').style.display = 'flex';
-
-  // Render pipeline steps
   var pipeline = document.getElementById('pipeline');
   var html = '';
-
   for (var s = 0; s < result.steps.length; s++) {
     var step = result.steps[s];
-    var icon = PIPELINE_ICONS[step.name] || '⚙️';
+    var icon = PIPELINE_ICONS[step.name] || '\u2699\ufe0f';
     var statusClass = step.status === 'success' ? 'success' : step.status;
     var statusColor = step.status === 'success' ? 'var(--green)' : 'var(--red)';
     var statusText = step.status === 'success' ? step.detail || 'OK' : step.detail || 'Error';
     var timingMs = step.ms || 0;
-
     html += '<div class="pipeline-step ' + statusClass + '">';
     html += '<div class="step-icon">' + icon + '</div>';
     html += '<div class="step-content">';
     html += '<div class="step-name">' + step.name + ' <span style="font-size:11px;color:var(--text2);font-weight:400">(' + timingMs + 'ms)</span></div>';
     html += '<div class="step-status"><span style="color:' + statusColor + '">' + statusText + '</span></div>';
-
-    // Extra info
     if (step.tables) {
       html += '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">';
       for (var t = 0; t < step.tables.length; t++) {
@@ -365,18 +342,12 @@ function renderResults(result) {
       }
       html += '</div>';
     }
-
     html += '</div></div>';
   }
-
-  // Total timing
   if (result.timing_ms) {
     html += '<div style="text-align:right;font-size:12px;color:var(--text2);margin-top:4px">Total: ' + result.timing_ms + 'ms</div>';
   }
-
   pipeline.innerHTML = html;
-
-  // Show SQL with syntax highlighting
   var sql = result.formatted_sql || result.sql;
   if (sql) {
     document.getElementById('sqlCard').style.display = '';
@@ -385,25 +356,17 @@ function renderResults(result) {
     codeEl.className = 'language-sql';
     if (typeof hljs !== 'undefined') hljs.highlightElement(codeEl);
   }
-
-  // Add to history
   addToHistory(result.query || document.getElementById('queryInput').value.trim(), result);
-
-  // Show results table
   if (result.rows && result.rows.length > 0) {
     var tc = document.getElementById('tableCard');
     tc.style.display = '';
     var badge = document.getElementById('rowBadge');
-    badge.innerHTML = result.rows.length + ' rows' +
-      ' <button class="btn-export" onclick="exportCSV()" title="Export CSV">📥 CSV</button>' +
-      ' <button class="btn-export" onclick="exportJSON()" title="Export JSON">📦 JSON</button>';
-
+    badge.innerHTML = result.rows.length + ' rows <button class="btn-export" onclick="exportCSV()">\ud83d\udce5 CSV</button> <button class="btn-export" onclick="exportJSON()">\ud83d\udce6 JSON</button>';
     var cols = result.columns || Object.keys(result.rows[0]);
     var th = '<tr>';
     for (var i = 0; i < cols.length; i++) th += '<th>' + cols[i] + '</th>';
     th += '</tr>';
     document.getElementById('tableHead').innerHTML = th;
-
     var tb = '';
     for (var r = 0; r < result.rows.length; r++) {
       tb += '<tr>';
@@ -456,10 +419,7 @@ function renderHistory() {
     var cls = h.success ? 'history-ok' : 'history-err';
     return '<div class="history-item ' + cls + '" onclick="replayQuery(' + i + ')" title="' + (h.sql || '') + '">' +
       '<div class="history-query">' + h.query + '</div>' +
-      '<div class="history-meta">' +
-      '<span>' + (h.success ? '✓ ' + h.rows + ' rows' : '✗ error') + '</span>' +
-      '<span>' + h.time + '</span>' +
-      '</div></div>';
+      '<div class="history-meta"><span>' + (h.success ? '\u2713 ' + h.rows + ' rows' : '\u2717 error') + '</span><span>' + h.time + '</span></div></div>';
   }).join('');
 }
 
@@ -502,15 +462,11 @@ function exportJSON() {
   var headers = [];
   var data = [];
   var headerCells = table.rows[0].querySelectorAll('th');
-  for (var c = 0; c < headerCells.length; c++) {
-    headers.push(headerCells[c].textContent);
-  }
+  for (var c = 0; c < headerCells.length; c++) headers.push(headerCells[c].textContent);
   for (var r = 1; r < table.rows.length; r++) {
     var row = {};
     var cells = table.rows[r].querySelectorAll('td');
-    for (var c = 0; c < cells.length; c++) {
-      row[headers[c]] = cells[c].textContent;
-    }
+    for (var c = 0; c < cells.length; c++) row[headers[c]] = cells[c].textContent;
     data.push(row);
   }
   var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -528,12 +484,8 @@ function copySQL() {
     var btn = document.querySelector('.btn-copy');
     btn.textContent = 'Copied!';
     btn.classList.add('copied');
-    setTimeout(function() {
-      btn.textContent = '📋';
-      btn.classList.remove('copied');
-    }, 2000);
+    setTimeout(function() { btn.textContent = '\ud83d\udccb'; btn.classList.remove('copied'); }, 2000);
   } catch (e) {
-    // Fallback
     var ta = document.createElement('textarea');
     ta.value = sql;
     document.body.appendChild(ta);
@@ -543,33 +495,21 @@ function copySQL() {
   }
 }
 
-// ─── Database Switching ──────────────────────────────────────────────
-
 function switchDatabase() {
   uploadMode = 'switch';
-
-  // Show cancel button, reset upload state
   var btnCancel = document.getElementById('btnCancelSwitch');
   if (btnCancel) btnCancel.style.display = '';
-
-  // Reset upload state
   document.getElementById('dbDropZone').style.display = '';
   document.getElementById('dbUploadStatus').style.display = 'none';
   document.getElementById('dbError').style.display = 'none';
-
-  // Показать экран загрузки
   document.getElementById('mainContent').style.display = 'none';
   document.getElementById('uploadScreen').style.display = '';
 }
 
 function cancelSwitchDB() {
   uploadMode = 'initial';
-
-  // Hide upload screen, show interface
   document.getElementById('uploadScreen').style.display = 'none';
   document.getElementById('mainContent').style.display = '';
-
-  // Reset buttons
   var btnCancel = document.getElementById('btnCancelSwitch');
   if (btnCancel) btnCancel.style.display = 'none';
 }
