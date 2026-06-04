@@ -67,7 +67,7 @@ def generate_sql(prompt: str, temperature: float = 0.2) -> Optional[str]:
         print(f"[LLM] Ошибка инициализации: {e}")
         return None
 
-    model_name = os.environ.get("OPENROUTER_MODEL", "openrouter/free")
+    model_name = os.environ.get("OPENROUTER_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free")
 
     try:
         response = client.chat.completions.create(
