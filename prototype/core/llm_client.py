@@ -1,9 +1,10 @@
 """
 llm_client.py — Клиент для Google Gemini API.
-С retry, таймаутом и классификацией ошибок.
+С rate limiter, экспоненциальным backoff, таймаутом и классификацией ошибок.
 """
 import os
 import time
+import random
 import logging
 from typing import Optional, Tuple
 
@@ -19,10 +20,64 @@ except ImportError:
     pass
 
 
-def generate_sql(prompt: str, temperature: float = 0.2, max_retries: int = 2) -> Tuple[Optional[str], Optional[str]]:
+# ─── Rate Limiter (Token Bucket) ──────────────────────────────────────
+# Gemini free tier: ~60 RPM. Берем с запасом — 30 запросов в минуту.
+
+class RateLimiter:
+    """Token bucket rate limiter — предотвращает 429 до того, как он случился."""
+
+    def __init__(self, max_rpm: int = 30):
+        self.max_tokens = max_rpm
+        self.tokens = max_rpm
+        self.last_refill = time.monotonic()
+        self.refill_interval = 60.0 / max_rpm  # секунд на 1 токен
+
+    def _refill(self):
+        now = time.monotonic()
+        elapsed = now - self.last_refill
+        self.tokens = min(self.max_tokens, self.tokens + elapsed / self.refill_interval)
+        self.last_refill = now
+
+    def acquire(self, block: bool = True) -> bool:
+        """Захватить токен. Если block=True — ждать, пока токен не появится."""
+        self._refill()
+        if self.tokens >= 1:
+            self.tokens -= 1
+            return True
+        if not block:
+            return False
+        # Ждём, пока появится токен
+        wait = self.refill_interval * (1 - self.tokens)
+        logger.info(f"Rate limiter: waiting {wait:.1f}s for token...")
+        time.sleep(wait)
+        self._refill()
+        self.tokens -= 1
+        return True
+
+    def wait_if_needed(self):
+        """Захватить токен (с ожиданием, если нужно)."""
+        self.acquire(block=True)
+
+
+# Глобальный rate limiter (один на весь процесс)
+_rate_limiter = RateLimiter(max_rpm=30)
+
+
+def _exponential_backoff(attempt: int, base_delay: float = 5.0, max_delay: float = 120.0) -> float:
+    """Экспоненциальная задержка с jitter: 5, 10, 20, 40, 80, 120, 120..."""
+    delay = min(base_delay * (2 ** attempt), max_delay)
+    jitter = random.uniform(0.5, 1.5)
+    return delay * jitter
+
+
+def generate_sql(prompt: str, temperature: float = 0.2, max_retries: int = 6) -> Tuple[Optional[str], Optional[str]]:
     """
     Отправляет промпт в Gemini и получает SQL-запрос.
-    
+
+    - Rate limiter: не даёт превысить лимит запросов
+    - Экспоненциальный backoff: до 120 секунд между попытками
+    - Всего max_retries+1 = 7 попыток при 429
+
     Returns:
         (sql, None) — успех
         (None, error_detail) — ошибка с описанием
@@ -34,12 +89,19 @@ def generate_sql(prompt: str, temperature: float = 0.2, max_retries: int = 2) ->
         return None, "GEMINI_API_KEY не задан"
 
     model_name = settings.GEMINI_MODEL
+    timeout = settings.GEMINI_TIMEOUT
     last_error: Optional[str] = None
 
     for attempt in range(max_retries + 1):
+        # Ждём перед первым запросом, если лимит исчерпан
+        _rate_limiter.wait_if_needed()
+
         try:
-            client = _genai.Client(api_key=settings.GEMINI_API_KEY)
-            logger.info(f"Gemini request: model={model_name}, attempt={attempt+1}")
+            client = _genai.Client(
+                api_key=settings.GEMINI_API_KEY,
+                http_options={"timeout": timeout * 1000},  # миллисекунды
+            )
+            logger.info(f"Gemini request: model={model_name}, attempt={attempt+1}/{max_retries+1}")
 
             response = client.models.generate_content(
                 model=model_name,
@@ -54,7 +116,9 @@ def generate_sql(prompt: str, temperature: float = 0.2, max_retries: int = 2) ->
             if not raw_output:
                 last_error = "Модель вернула пустой ответ"
                 if attempt < max_retries:
-                    time.sleep(2)
+                    delay = _exponential_backoff(attempt)
+                    logger.warning(f"{last_error} — повтор через {delay:.0f}с")
+                    time.sleep(delay)
                     continue
                 return None, last_error
 
@@ -64,31 +128,70 @@ def generate_sql(prompt: str, temperature: float = 0.2, max_retries: int = 2) ->
 
             last_error = "Не удалось извлечь SQL из ответа"
             if attempt < max_retries:
+                delay = _exponential_backoff(attempt)
+                logger.warning(f"{last_error} — повтор через {delay:.0f}с")
+                time.sleep(delay)
                 continue
             return None, last_error
 
         except Exception as e:
             error_str = str(e).lower()
-            if "429" in error_str or "quota" in error_str or "rate" in error_str:
-                last_error = f"Превышен лимит запросов Gemini (429). Попробуйте позже."
+            status_code = getattr(e, "code", 0) or getattr(e, "status_code", 0)
+
+            # 429 Too Many Requests — превышен лимит
+            if status_code == 429 or "429" in error_str or "quota" in error_str or "rate" in error_str or "resource exhausted" in error_str or "too many" in error_str:
                 if attempt < max_retries:
-                    time.sleep((attempt + 1) * 4)
+                    delay = _exponential_backoff(attempt)
+                    last_error = f"Превышен лимит запросов Gemini (429). Повтор через {delay:.0f}с (попытка {attempt+2}/{max_retries+1})"
+                    logger.warning(last_error)
+                    time.sleep(delay)
                     continue
-            elif "api key" in error_str or "unauthorized" in error_str or "401" in error_str:
-                last_error = "Неверный API ключ Gemini. Проверьте GEMINI_API_KEY."
+                # Все попытки исчерпаны — последняя попытка с максимальной паузой
+                last_error = "Превышен лимит запросов Gemini (429). Все попытки исчерпаны. Попробуйте позже."
+                logger.error(last_error)
                 break
-            elif "not found" in error_str or "model" in error_str and "not" in error_str:
-                last_error = f"Модель '{model_name}' не найдена или недоступна."
+
+            # 401/403 — проблема с ключом
+            elif status_code in (401, 403) or "api key" in error_str or "unauthorized" in error_str or "permission" in error_str or "401" in error_str:
+                last_error = "Неверный или заблокированный API ключ Gemini. Проверьте GEMINI_API_KEY."
+                logger.error(last_error)
                 break
-            elif "timeout" in error_str or "deadline" in error_str:
-                last_error = "Таймаут запроса к Gemini."
+
+            # Модель не найдена
+            elif status_code == 404 or ("not found" in error_str and "model" in error_str):
+                last_error = f"Модель '{model_name}' не найдена или недоступна. Проверьте GEMINI_MODEL."
+                logger.error(last_error)
+                break
+
+            # Таймаут
+            elif "timeout" in error_str or "deadline" in error_str or "timed out" in error_str:
+                last_error = f"Таймаут запроса к Gemini ({timeout}с)."
                 if attempt < max_retries:
+                    delay = _exponential_backoff(attempt)
+                    logger.warning(f"Timeout — повтор через {delay:.0f}с")
+                    time.sleep(delay)
                     continue
+                break
+
+            # 500/503 — временная ошибка сервера
+            elif status_code in (500, 502, 503, 504) or "server" in error_str or "temporarily" in error_str or "unavailable" in error_str:
+                last_error = f"Временная ошибка сервера Gemini ({status_code or 503})."
+                if attempt < max_retries:
+                    delay = _exponential_backoff(attempt)
+                    logger.warning(f"Server error — повтор через {delay:.0f}с")
+                    time.sleep(delay)
+                    continue
+                break
+
+            # Все остальные ошибки
             else:
                 last_error = f"Ошибка Gemini: {e}"
                 if attempt < max_retries:
-                    time.sleep(2)
+                    delay = _exponential_backoff(attempt)
+                    logger.warning(f"{last_error} — повтор через {delay:.0f}с")
+                    time.sleep(delay)
                     continue
+                break
 
     return None, last_error
 
