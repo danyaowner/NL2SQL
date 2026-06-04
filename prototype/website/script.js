@@ -71,6 +71,18 @@ const API = {
       throw new Error(err.error || ('HTTP ' + res.status));
     }
     return res.json();
+  },
+  async connectDB(params) {
+    const res = await fetch(API._url('connect-db'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(function() { return {}; });
+      throw new Error(err.error || err.detail || ('HTTP ' + res.status));
+    }
+    return res.json();
   }
 };
 
@@ -93,7 +105,120 @@ const PIPELINE_ICONS = {
 
 // ─── Init ────────────────────────────────────────────────────────────
 
+// ─── Upload Tab Switching ─────────────────────────────────────────
+
+function switchUploadTab(tab) {
+  var tabFile = document.getElementById('tabFile');
+  var tabServer = document.getElementById('tabServer');
+  var panelFile = document.getElementById('panelFile');
+  var panelServer = document.getElementById('panelServer');
+  var btnDemo = document.getElementById('btnDemo');
+  var dropZone = document.getElementById('dbDropZone');
+  var uploadStatus = document.getElementById('dbUploadStatus');
+  var errorEl = document.getElementById('dbError');
+
+  if (tab === 'file') {
+    tabFile.classList.add('active');
+    tabServer.classList.remove('active');
+    panelFile.style.display = '';
+    panelServer.style.display = 'none';
+    if (btnDemo) btnDemo.style.display = '';
+    if (dropZone) dropZone.style.display = '';
+    if (uploadStatus) uploadStatus.style.display = 'none';
+    if (errorEl) errorEl.style.display = 'none';
+  } else {
+    tabServer.classList.add('active');
+    tabFile.classList.remove('active');
+    panelServer.style.display = '';
+    panelFile.style.display = 'none';
+    if (btnDemo) btnDemo.style.display = 'none';
+    if (errorEl) errorEl.style.display = 'none';
+    // Авто-порт при смене диалекта
+    var dialect = document.getElementById('connDialect');
+    if (dialect) {
+      updatePortForDialect();
+    }
+  }
+}
+
+function updatePortForDialect() {
+  var dialect = document.getElementById('connDialect').value;
+  var portEl = document.getElementById('connPort');
+  if (dialect === 'postgresql' && portEl.value === '3306') portEl.value = '5432';
+  if (dialect === 'mysql' && portEl.value === '5432') portEl.value = '3306';
+  if (dialect === 'sqlite') portEl.value = '';
+}
+
+async function connectToServer() {
+  var btnConnect = document.getElementById('btnConnect');
+  var errorEl = document.getElementById('dbError');
+  var dialect = document.getElementById('connDialect').value;
+  var host = document.getElementById('connHost').value.trim();
+  var port = parseInt(document.getElementById('connPort').value) || (dialect === 'mysql' ? 3306 : 5432);
+  var database = document.getElementById('connDatabase').value.trim();
+  var username = document.getElementById('connUsername').value.trim();
+  var password = document.getElementById('connPassword').value;
+
+  if (!database && dialect !== 'sqlite') {
+    showUploadError('Введите название базы данных');
+    return;
+  }
+
+  btnConnect.disabled = true;
+  btnConnect.innerHTML = '<span class="step-loader" style="width:14px;height:14px;border-width:2px;margin-right:6px"></span> Подключение...';
+  if (errorEl) errorEl.style.display = 'none';
+
+  try {
+    var params = {
+      dialect: dialect,
+      host: host,
+      port: port,
+      database: database,
+      username: username,
+      password: password,
+    };
+
+    var result = await API.connectDB(params);
+    if (result.success) {
+      // Скрываем экран загрузки, показываем интерфейс
+      document.getElementById('uploadScreen').style.display = 'none';
+      document.getElementById('mainContent').style.display = '';
+
+      var statusText = document.getElementById('statusText');
+      if (statusText) statusText.textContent = 'Connected: ' + result.name;
+
+      var dbHeaderName = document.getElementById('dbHeaderName');
+      if (dbHeaderName) dbHeaderName.textContent = result.name;
+
+      clearHistory();
+      document.getElementById('resultsSection').style.display = 'none';
+      document.getElementById('sqlCard').style.display = 'none';
+      document.getElementById('tableCard').style.display = 'none';
+      document.getElementById('errorCard').style.display = 'none';
+
+      loadSchema();
+    } else {
+      showUploadError(result.error || 'Ошибка подключения');
+    }
+  } catch (e) {
+    showUploadError(e.message);
+  } finally {
+    btnConnect.disabled = false;
+    btnConnect.innerHTML = '<span class="btn-demo-icon">🔗</span><span>Подключиться</span>';
+    if (uploadMode === 'switch') {
+      uploadMode = 'initial';
+    }
+  }
+}
+
+// ─── Init ────────────────────────────────────────────────────────────
+
 window.addEventListener('DOMContentLoaded', function() {
+  // Привязываем смену диалекта к авто-порту
+  var dialectSel = document.getElementById('connDialect');
+  if (dialectSel) {
+    dialectSel.addEventListener('change', updatePortForDialect);
+  }
   checkHealthAndInit();
   renderQuickTags();
   initUpload();

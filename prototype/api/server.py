@@ -32,6 +32,13 @@ from pydantic import BaseModel
 from core.pipeline import process_nl_query
 from core.schema_manager import introspect_schema, get_schema_summary
 
+# Опциональный импорт адаптера БД
+try:
+    from core.db_adapter import DatabaseAdapter
+    HAS_DB_ADAPTER = True
+except ImportError:
+    HAS_DB_ADAPTER = False
+
 
 def _init_demo_database():
     """Ленивый импорт init_db — не роняет сервер при ошибке."""
@@ -64,6 +71,24 @@ class SchemaResponse(BaseModel):
     db_loaded: bool
 
 
+class ConnectRequest(BaseModel):
+    dialect: str  # "sqlite", "postgresql", "mysql"
+    host: str = "localhost"
+    port: int = 5432
+    database: str = ""
+    username: str = ""
+    password: str = ""
+    db_path: str = ""  # для SQLite через форму (альтернатива upload)
+
+
+class ConnectResponse(BaseModel):
+    success: bool
+    name: str | None = None
+    dialect: str | None = None
+    error: str | None = None
+    tables_count: int = 0
+
+
 class UploadResponse(BaseModel):
     success: bool
     name: str | None = None
@@ -75,6 +100,7 @@ class HealthResponse(BaseModel):
     status: str
     db_loaded: bool
     db_path: str | None = None
+    db_dialect: str = "sqlite"
     api_key_configured: bool
 
 
@@ -86,6 +112,7 @@ UPLOAD_DIR = Path(tempfile.gettempdir()) / "nl2sql_uploads"
 
 # Текущая активная БД (может меняться при upload)
 _current_db = None
+_db_adapter = None  # универсальный адаптер (для PostgreSQL/MySQL)
 
 app = FastAPI(
     title="NL2SQL API",
@@ -190,6 +217,12 @@ async def upload_database(file: UploadFile = File(...)):
             error="Файл не является валидной SQLite базой данных"
         )
 
+    # Закрываем старый адаптер если есть
+    global _db_adapter
+    if _db_adapter:
+        _db_adapter.close()
+        _db_adapter = None
+
     # Устанавливаем как активную БД
     _current_db = str(save_path)
 
@@ -197,6 +230,76 @@ async def upload_database(file: UploadFile = File(...)):
         success=True,
         name=save_path.name,
         original_name=file.filename,
+    )
+
+
+@app.post("/api/connect-db", response_model=ConnectResponse)
+async def connect_database(req: ConnectRequest):
+    """
+    Подключение к внешней СУБД (PostgreSQL/MySQL) или SQLite по пути.
+    После подключения становится активной БД для всех запросов.
+    """
+    global _current_db, _db_adapter
+
+    if not HAS_DB_ADAPTER:
+        return ConnectResponse(
+            success=False,
+            error="DatabaseAdapter не найден. Проверьте установку."
+        )
+
+    dialect = req.dialect.lower()
+    if dialect not in ("sqlite", "postgresql", "mysql"):
+        return ConnectResponse(
+            success=False,
+            error=f"Неподдерживаемый диалект: {dialect}. Используйте: sqlite, postgresql, mysql"
+        )
+
+    # Закрываем предыдущее соединение
+    if _db_adapter:
+        _db_adapter.close()
+        _db_adapter = None
+    _current_db = None
+
+    # Создаём адаптер
+    if dialect == "sqlite":
+        db_path = req.db_path or str(DEFAULT_DB)
+        if not os.path.exists(db_path):
+            return ConnectResponse(success=False, error=f"Файл БД не найден: {db_path}")
+        adapter = DatabaseAdapter(dialect="sqlite", db_path=db_path)
+    else:
+        adapter = DatabaseAdapter(
+            dialect=dialect,
+            host=req.host,
+            port=req.port,
+            database=req.database,
+            username=req.username,
+            password=req.password,
+        )
+
+    # Пробуем подключиться
+    ok, err = adapter.connect()
+    if not ok:
+        return ConnectResponse(success=False, error=err)
+
+    # Читаем схему для проверки
+    try:
+        tables, schema_err = adapter.get_tables()
+        if schema_err:
+            adapter.close()
+            return ConnectResponse(success=False, error=f"Ошибка чтения схемы: {schema_err}")
+    except Exception as e:
+        adapter.close()
+        return ConnectResponse(success=False, error=f"Ошибка чтения схемы: {e}")
+
+    _db_adapter = adapter
+    if dialect == "sqlite":
+        _current_db = req.db_path or str(DEFAULT_DB)
+
+    return ConnectResponse(
+        success=True,
+        name=adapter.display_name,
+        dialect=dialect,
+        tables_count=len(tables),
     )
 
 
@@ -222,6 +325,11 @@ async def init_demo_db():
         )
 
     _current_db = demo_path
+    # Закрываем старый адаптер если был
+    global _db_adapter
+    if _db_adapter:
+        _db_adapter.close()
+        _db_adapter = None
     return UploadResponse(
         success=True,
         name=DEFAULT_DB.name,
@@ -229,11 +337,26 @@ async def init_demo_db():
     )
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """При остановке: закрываем соединения с БД."""
+    global _db_adapter
+    if _db_adapter:
+        _db_adapter.close()
+        _db_adapter = None
+
+
 @app.get("/api/health", response_model=HealthResponse)
 async def health_check():
     """Проверка состояния системы."""
-    db_path = _get_db_path()
-    db_loaded = os.path.exists(db_path)
+    has_adapter = _db_adapter is not None and _db_adapter.is_connected
+    db_loaded = has_adapter or os.path.exists(_get_db_path())
+    db_dialect = _db_adapter.dialect if _db_adapter else "sqlite"
+    if has_adapter:
+        db_path = _db_adapter.display_name
+    else:
+        path = _get_db_path()
+        db_path = path if os.path.exists(path) else None
     api_key = os.environ.get("GEMINI_API_KEY", "")
 
     # Проверяем .env если ключ не в окружении
@@ -249,6 +372,7 @@ async def health_check():
         status="ok",
         db_loaded=db_loaded,
         db_path=db_path if db_loaded else None,
+        db_dialect=db_dialect,
         api_key_configured=bool(api_key),
     )
 
@@ -256,6 +380,20 @@ async def health_check():
 @app.get("/api/schema", response_model=SchemaResponse)
 async def get_schema():
     """Получить схему базы данных."""
+    # Если есть активный адаптер — используем его
+    if _db_adapter and _db_adapter.is_connected:
+        try:
+            schema = _db_adapter.get_full_schema()
+            summary = get_schema_summary(schema)
+            return SchemaResponse(
+                tables=summary,
+                db_path=_db_adapter.display_name,
+                db_loaded=True,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Ошибка чтения схемы: {e}")
+
+    # Fallback: файловый режим
     db_path = _get_db_path()
 
     if not os.path.exists(db_path):
@@ -288,16 +426,23 @@ async def process_query(request: QueryRequest):
     """
     db_path = _get_db_path()
 
-    if not os.path.exists(db_path):
+    # Если адаптер активен — БД доступна через него
+    if _db_adapter and _db_adapter.is_connected:
+        pass  # ок, адаптер жив
+    elif not os.path.exists(db_path):
         raise HTTPException(
             status_code=404,
-            detail="База данных не найдена. Загрузите .db файл."
+            detail="База данных не найдена. Загрузите .db файл или подключитесь к серверу."
         )
 
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Запрос не может быть пустым")
 
-    result = process_nl_query(request.query, db_path)
+    result = process_nl_query(
+        request.query,
+        db_path,
+        adapter=_db_adapter if (_db_adapter and _db_adapter.is_connected) else None
+    )
 
     return QueryResponse(**result)
 

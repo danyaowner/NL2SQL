@@ -12,11 +12,11 @@ from .llm_client import generate_sql
 from .sql_validator import validate, get_sql_info
 from .executor import execute_query
 
-
 def process_nl_query(
     user_query: str,
     db_path: str,
     api_key: Optional[str] = None,
+    adapter: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Полный pipeline обработки запроса на естественном языке.
@@ -82,7 +82,10 @@ def process_nl_query(
     # === Шаг 2: Schema Introspection ===
     step_start = time.time()
     try:
-        schema = introspect_schema(db_path)
+        if adapter and adapter.is_connected:
+            schema = adapter.get_full_schema()
+        else:
+            schema = introspect_schema(db_path)
         schema_text = format_schema_for_prompt(schema)
         schema_summary = get_schema_summary(schema)
     except Exception as e:
@@ -105,7 +108,8 @@ def process_nl_query(
 
     # === Шаг 3: Prompt Building ===
     step_start = time.time()
-    prompt = build_prompt(cleaned, schema_text)
+    dialect = adapter.dialect if adapter else "sqlite"
+    prompt = build_prompt(cleaned, schema_text, dialect=dialect)
     result["steps"].append({
         "name": "Prompt",
         "status": "success",
@@ -162,7 +166,10 @@ def process_nl_query(
 
     # === Шаг 6: Execution ===
     step_start = time.time()
-    rows, exec_error = execute_query(db_path, sql)
+    if adapter and adapter.is_connected:
+        rows, exec_error = adapter.execute(sql)
+    else:
+        rows, exec_error = execute_query(db_path, sql)
 
     if exec_error:
         result["error"] = f"Ошибка выполнения: {exec_error}"
